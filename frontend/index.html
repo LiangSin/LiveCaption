@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LiveCaption</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+  <!-- Runtime config: generated from .env by start_frontend.sh or provided manually -->
+  <script src="./config.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <h1>LiveCaption</h1>
+    </header>
+
+    <section class="layout">
+      <div class="video-panel panel">
+        <div class="status-row">
+          <span class="label">Video status:</span>
+          <span id="videoStatus">waiting for signal</span>
+        </div>
+        <video id="player" controls playsinline muted></video>
+        <div id="noSignalMessage" class="no-signal-message">現在沒訊號</div>
+      </div>
+
+      <div class="subtitle-panel panel">
+        <div class="status-row">
+          <span class="label">Subtitle status:</span>
+          <span id="subtitleStatus">disconnected</span>
+        </div>
+        <div id="caption" class="caption">Waiting for subtitles…</div>
+        <div id="log" class="log"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
+
