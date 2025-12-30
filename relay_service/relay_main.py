@@ -310,6 +310,8 @@ async def asr_link(
     pending_chunk: bytes | None = None
     stop_timeout = max(1.0, float(cfg.stop_timeout_seconds))
     sent_chunks = 0
+    last_status: str | None = None
+    last_caption: tuple[str, bool] | None = None
 
     async def graceful_stop(ws) -> None:
         """Signal stream end with empty bytes, then wait for ready_to_stop."""
@@ -412,7 +414,7 @@ async def asr_link(
                         chunk = None
 
                 async def receiver():
-                    nonlocal ready_to_stop_seen
+                    nonlocal ready_to_stop_seen, last_status, last_caption
                     async for message in ws:
                         try:
                             payload = json.loads(message)
@@ -429,8 +431,49 @@ async def asr_link(
                             break
                         if debug_mode:
                             logger.info("ASR result: %s", payload)
-                        else:
+                            continue
+
+                        if payload.get("type") in {"caption", "status"}:
                             await broadcaster.broadcast(payload)
+                            continue
+
+                        status = payload.get("status")
+                        if status and status != last_status:
+                            await broadcaster.broadcast(
+                                {
+                                    "type": "status",
+                                    "state": status,
+                                    "detail": status,
+                                    "ts": payload["ts"],
+                                }
+                            )
+                            last_status = status
+
+                        lines = payload.get("lines") or []
+                        line_text = ""
+                        if isinstance(lines, list):
+                            for line in reversed(lines):
+                                if not isinstance(line, dict):
+                                    continue
+                                candidate = (line.get("text") or "").strip()
+                                if candidate:
+                                    line_text = candidate
+                                    break
+                        buffer_text = (payload.get("buffer_transcription") or "").strip()
+                        text = " ".join(part for part in (line_text, buffer_text) if part).strip()
+                        if text:
+                            partial = bool(buffer_text)
+                            caption_key = (text, partial)
+                            if caption_key != last_caption:
+                                await broadcaster.broadcast(
+                                    {
+                                        "type": "caption",
+                                        "text": text,
+                                        "partial": partial,
+                                        "ts": payload["ts"],
+                                    }
+                                )
+                                last_caption = caption_key
 
                 sender_task = asyncio.create_task(sender(first_chunk))
                 receiver_task = asyncio.create_task(receiver())
