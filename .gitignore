@@ -1,2 +1,8 @@
 # Generated files
 frontend/config.js
+
+# SSL certificates
+ssl-config/
+
+# Cache files
+__pycache__/
