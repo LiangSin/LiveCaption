@@ -31,6 +31,7 @@
     let wsBackoff = 1000;
     let idleTimer = null;
     let lastWsMessage = null;
+    let liveCatchupTimer = null;
 
     function appendLog(message) {
     const ts = new Date().toISOString();
@@ -54,12 +55,12 @@
       if (captionEl) {
         if (hasSignal) {
           // 有訊號時顯示正常字幕（如果沒有字幕就顯示等待）
-          if (captionEl.textContent === "沒有訊號") {
+          if (captionEl.textContent === "No signal") {
             captionEl.textContent = "Waiting for subtitles…";
           }
         } else {
-          // 沒有訊號時顯示"沒有訊號"
-          captionEl.textContent = "沒有訊號";
+          // 沒有訊號時顯示 "No signal"
+          captionEl.textContent = "No signal";
         }
       }
     }
@@ -196,17 +197,24 @@
   }
 
   function loadHlsStream(url) {
-    const useHlsJs = window.Hls && window.Hls.isSupported() && url.endsWith(".m3u8");
+    const isHlsUrl = url.endsWith(".m3u8");
+    const useHlsJs = window.Hls && window.Hls.isSupported() && isHlsUrl;
+    if (liveCatchupTimer) {
+      clearInterval(liveCatchupTimer);
+      liveCatchupTimer = null;
+    }
 
     if (useHlsJs) {
       const hls = new window.Hls({
-        // 放寬直播配置以增加相容性
-        liveSyncDuration: 10, // 與直播邊緣保持10秒同步（放寬）
-        liveMaxLatencyDuration: 30, // 最大延遲30秒（放寬）
+        // 加速追趕直播邊緣，避免越播越慢
+        lowLatencyMode: true,
+        liveSyncDuration: 3,
+        liveMaxLatencyDuration: 10,
+        maxLiveSyncPlaybackRate: 1.5,
         liveDurationInfinity: true,
-        maxBufferLength: 30, // 最大緩衝30秒（放寬）
-        maxMaxBufferLength: 60,
-        backBufferLength: 30, // 後緩衝30秒（放寬）
+        maxBufferLength: 12,
+        maxMaxBufferLength: 20,
+        backBufferLength: 6,
         maxRetries: 6, // 增加重試次數
         startLevel: -1,
         enableWorker: true,
@@ -216,6 +224,19 @@
 
       let hasManifestParsed = false;
       let hasFragLoaded = false;
+      let lastCatchUpAt = 0;
+
+      const maybeCatchUp = (source) => {
+        if (player.seeking) return;
+        const liveSyncPosition = hls.liveSyncPosition;
+        if (!Number.isFinite(liveSyncPosition)) return;
+        const delta = liveSyncPosition - player.currentTime;
+        if (delta > 5 && Date.now() - lastCatchUpAt > 4000) {
+          appendLog(`Live sync jump (${source}): behind ${delta.toFixed(1)}s`);
+          player.currentTime = liveSyncPosition;
+          lastCatchUpAt = Date.now();
+        }
+      };
 
       hls.on(window.Hls.Events.ERROR, (_, data) => {
         appendLog(`HLS error: ${data?.details || "unknown"}, type: ${data?.type}, fatal: ${data?.fatal}`);
@@ -252,6 +273,10 @@
         setVideoStatus("playing");
       });
 
+      hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
+        maybeCatchUp("frag");
+      });
+
       // 直播同步事件 - 確保播放最新內容
       hls.on(window.Hls.Events.LIVE_BACK_BUFFER_REACHED, () => {
         appendLog("Live sync: reached back buffer");
@@ -259,6 +284,7 @@
 
       hls.on(window.Hls.Events.LIVE_SYNCING, () => {
         appendLog("Live sync: syncing to live edge");
+        maybeCatchUp("sync");
       });
 
       // 如果超過 30 秒還沒有載入成功，認為沒有訊號
@@ -294,6 +320,10 @@
     // Native playback (e.g., MP4 progressive, WebRTC blob URL, etc.)
     player.src = url;
     player.muted = true; // 設置靜音以增加自動播放成功率
+    if (liveCatchupTimer) {
+      clearInterval(liveCatchupTimer);
+      liveCatchupTimer = null;
+    }
     player.onloadeddata = () => setVideoStatus("playing");
     player.onerror = () => {
       appendLog("Video error while loading source");
@@ -301,6 +331,21 @@
       // attempt reload with backoff - 增加到 10 秒避免瘋狂刷新
       setTimeout(loadStream, 10000);
     };
+
+    if (isHlsUrl) {
+      const maybeCatchUpNative = () => {
+        if (player.seeking) return;
+        if (!player.seekable || player.seekable.length === 0) return;
+        const liveEdge = player.seekable.end(player.seekable.length - 1);
+        const delta = liveEdge - player.currentTime;
+        if (delta > 5) {
+          appendLog(`Live sync jump (native): behind ${delta.toFixed(1)}s`);
+          player.currentTime = Math.max(0, liveEdge - 0.5);
+        }
+      };
+      player.addEventListener("loadedmetadata", maybeCatchUpNative, { once: true });
+      liveCatchupTimer = setInterval(maybeCatchUpNative, 5000);
+    }
 
     // 對於原生播放也嘗試自動播放
     const tryNativePlay = () => {
@@ -321,4 +366,3 @@
   // 開始等待配置載入
   waitForConfig();
 })();
-
