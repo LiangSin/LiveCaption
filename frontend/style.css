@@ -16,49 +16,128 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
+  touch-action: manipulation; /* 防止雙擊縮放 */
+  -webkit-tap-highlight-color: transparent; /* 移除點擊高亮 */
+}
+
+#app {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* 防止內容未加載完成時的閃爍和寬度跳動 */
+#app:empty {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+#app > * {
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 .page {
   max-width: 1200px;
+  width: 100%;
+  max-width: 100vw;
   margin: 0 auto;
   padding: 24px 20px 40px;
+  overflow-x: hidden;
 }
 
 .page--simple {
-  max-width: none;
-  padding: 0;
-  min-height: 100vh;
+  max-width: 100vw;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh; /* 動態視窗高度，考慮移動端瀏覽器地址欄 */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 20px 0;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 0;
+  box-sizing: border-box;
 }
 
 .video-container {
   width: 90vw;
+  max-height: 80vh;
+  max-height: 80dvh; /* 動態視窗高度 */
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-bottom: 0px;
+  flex-shrink: 0;
 }
 
 .subtitle-container {
   width: 90vw;
+  flex-grow: 1;
+  min-height: 0;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: stretch;
 }
 
 .video-container .video-panel,
 .subtitle-container .subtitle-panel {
   width: 100%;
-  max-width: none;
+  max-width: 100%;
+}
+
+.video-panel,
+.subtitle-panel {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.video-container .video-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-container video {
+  width: 100%;
+  max-height: 80vh;
+  max-height: 80dvh; /* 動態視窗高度 */
+  object-fit: contain;
+  aspect-ratio: 16 / 9;
+}
+
+.video-container .no-signal-message {
+  width: 100%;
+  max-height: 80vh;
+  max-height: 80dvh; /* 動態視窗高度 */
+  aspect-ratio: 16 / 9;
+}
+
+.subtitle-container .subtitle-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.subtitle-container .caption {
+  flex-grow: 1;
+  height: auto !important;
+  min-height: 0;
 }
 
 .header {
@@ -94,6 +173,13 @@ button:hover {
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  max-width: 100%;
+}
+
+/* 確保所有視頻元素不會超出容器 */
+video {
+  max-width: 100%;
+  height: auto;
 }
 
 .field {
@@ -120,6 +206,8 @@ input[type="text"] {
   grid-template-columns: 1.2fr 1fr;
   gap: 16px;
   margin-top: 16px;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .layout--simple {
@@ -135,6 +223,7 @@ input[type="text"] {
   margin-top: 0;
   padding: 20px 0;
   min-height: 100vh;
+  min-height: 100dvh; /* 動態視窗高度 */
   display: flex !important;
   flex-direction: column !important;
   align-items: center;
@@ -142,6 +231,7 @@ input[type="text"] {
 
 .video-panel video {
   width: 100%;
+  max-width: 100%;
   min-height: 320px;
   background: #0d1117;
   border-radius: 10px;
@@ -173,6 +263,8 @@ input[type="text"] {
 
 .page--simple .caption {
   width: 100%;
+  height: 200px;
+  overflow-y: auto;
 }
 
 #app[data-layout="simple"] .layout {
@@ -203,7 +295,8 @@ input[type="text"] {
 
 #app[data-layout="simple"] .subtitle-panel .caption {
   width: 100%;
-  height: auto;
+  height: 200px;
+  overflow-y: auto;
 }
 
 .page--overlay .layout {
@@ -213,13 +306,17 @@ input[type="text"] {
 
 .page--overlay .video-panel video {
   height: 100vh;
+  height: 100dvh; /* 動態視窗高度 */
   min-height: 100vh;
+  min-height: 100dvh; /* 動態視窗高度 */
   border-radius: 0;
 }
 
 .page--overlay .no-signal-message {
   height: 100vh;
+  height: 100dvh; /* 動態視窗高度 */
   min-height: 100vh;
+  min-height: 100dvh; /* 動態視窗高度 */
   border-radius: 0;
 }
 
@@ -280,19 +377,23 @@ input[type="text"] {
 }
 
 .caption {
-  min-height: 80px;
+  height: 200px;
   padding: 12px;
   border-radius: 10px;
   background: #eef3ff;
   border: 1px solid #c8d6ff;
   font-size: 20px;
   font-weight: 600;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 
 .log {
   height: 260px;
   overflow-y: auto;
+  overflow-x: auto;
   background: #10131a;
   color: #e9ecf5;
   border-radius: 10px;
@@ -301,6 +402,9 @@ input[type="text"] {
   padding: 10px;
   font-family: ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 13px;
+  max-width: 100%;
+  word-wrap: break-word;
+  word-break: break-all;
 }
 
 .log div {

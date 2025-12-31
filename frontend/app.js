@@ -75,7 +75,18 @@
   }
 
   function setCaption(text) {
-    if (captionEl) captionEl.textContent = text || "—";
+    if (!captionEl) return;
+    
+    // 檢查是否已經滾動到底部（或接近底部，允許 5px 的誤差）
+    const isAtBottom = captionEl.scrollHeight - captionEl.scrollTop - captionEl.clientHeight <= 5;
+    
+    // 更新文字內容
+    captionEl.textContent = text || "—";
+    
+    // 如果之前在底部，則自動滾動到新的底部
+    if (isAtBottom) {
+      captionEl.scrollTop = captionEl.scrollHeight;
+    }
   }
 
   function scheduleIdleNotice() {
@@ -206,19 +217,17 @@
 
     if (useHlsJs) {
       const hls = new window.Hls({
-        // 加速追趕直播邊緣，避免越播越慢
         lowLatencyMode: true,
-        liveSyncDuration: 3,
-        liveMaxLatencyDuration: 10,
-        maxLiveSyncPlaybackRate: 1.5,
+        liveSyncDuration: 3, // time difference between live edge and player current time
+        liveMaxLatencyDuration: 7, // maximum tolerance for live edge
+        maxLiveSyncPlaybackRate: 1,
         liveDurationInfinity: true,
-        maxBufferLength: 12,
-        maxMaxBufferLength: 20,
-        backBufferLength: 6,
-        maxRetries: 6, // 增加重試次數
+        maxBufferLength: 6,
+        maxMaxBufferLength: 12,
+        backBufferLength: 3,
+        maxRetries: 6,
         startLevel: -1,
         enableWorker: true,
-        // 調試選項
         debug: true,
       });
 
