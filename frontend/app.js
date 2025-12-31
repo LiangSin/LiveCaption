@@ -32,6 +32,10 @@
     let idleTimer = null;
     let lastWsMessage = null;
     let liveCatchupTimer = null;
+    let liveDelay = null; // 直播延遲時間（毫秒）
+    let lastLiveDelayUpdate = null; // 上次更新 liveDelay 的時間
+    let pendingCaptions = []; // 待顯示的字幕隊列
+    let captionTimer = null; // 字幕顯示計時器
 
     function appendLog(message) {
     const ts = new Date().toISOString();
@@ -45,6 +49,82 @@
     while (logEl.childElementCount > max) {
       logEl.removeChild(logEl.lastChild);
     }
+  }
+
+  // 更新直播延遲
+  function updateLiveDelay(hlsInstance) {
+    if (!hlsInstance || !player) return;
+    
+    const now = Date.now();
+    // 如果 liveDelay 不存在，或超過 10 秒沒更新，則重新計算
+    if (liveDelay === null || !lastLiveDelayUpdate || (now - lastLiveDelayUpdate) > 10000) {
+      const liveSyncPos = hlsInstance.liveSyncPosition;
+      const currentTime = player.currentTime;
+      
+      if (Number.isFinite(liveSyncPos) && Number.isFinite(currentTime)) {
+        const delaySeconds = liveSyncPos - currentTime;
+        if (delaySeconds >= 0) {
+          liveDelay = delaySeconds * 1000; // 轉換為毫秒
+          lastLiveDelayUpdate = now;
+          appendLog(`Live delay updated: ${delaySeconds.toFixed(2)}s`);
+        }
+      }
+    }
+  }
+
+  // 處理待顯示的字幕隊列
+  function processCaptionQueue() {
+    if (captionTimer) {
+      clearTimeout(captionTimer);
+      captionTimer = null;
+    }
+
+    if (pendingCaptions.length === 0) return;
+
+    const now = Date.now();
+    const caption = pendingCaptions[0];
+
+    if (now >= caption.displayTime) {
+      // 時間到了，顯示字幕
+      pendingCaptions.shift();
+      setCaption(caption.text);
+      
+      // 繼續處理下一個
+      if (pendingCaptions.length > 0) {
+        processCaptionQueue();
+      }
+    } else {
+      // 還沒到時間，設置計時器
+      const delay = caption.displayTime - now;
+      captionTimer = setTimeout(processCaptionQueue, delay);
+    }
+  }
+
+  // 添加字幕到隊列（帶延遲）
+  function scheduleCaption(text, isPartial) {
+    const receiveTime = Date.now();
+    const delay = liveDelay !== null ? liveDelay : 0;
+    const displayTime = receiveTime + delay;
+
+    // 如果是部分字幕，替換隊列中的最後一個部分字幕（如果存在）
+    if (isPartial && pendingCaptions.length > 0) {
+      const lastCaption = pendingCaptions[pendingCaptions.length - 1];
+      if (lastCaption.isPartial) {
+        lastCaption.text = text;
+        lastCaption.displayTime = displayTime;
+        return;
+      }
+    }
+
+    pendingCaptions.push({
+      text,
+      isPartial,
+      receiveTime,
+      displayTime
+    });
+
+    // 開始處理隊列
+    processCaptionQueue();
   }
 
     function setSubtitleStatus(text) {
@@ -165,9 +245,10 @@
 
       if (payload.type === "caption") {
         const text = payload.text || "";
-        appendLog(`Caption${payload.partial ? " (partial)" : ""}: ${text}`);
-        setSubtitleStatus(payload.partial ? "receiving (partial)" : "receiving");
-        setCaption(text);
+        const isPartial = payload.partial || false;
+        appendLog(`Caption${isPartial ? " (partial)" : ""}: ${text}`);
+        setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+        scheduleCaption(text, isPartial);
         return;
       }
 
@@ -266,6 +347,8 @@
         appendLog(`HLS: Manifest parsed, levels: ${data.levels?.length || 0}`);
         hasManifestParsed = true;
         setVideoStatus("playing");
+        // 開始定期更新 live delay
+        updateLiveDelay(hls);
       });
 
       hls.on(window.Hls.Events.LEVEL_LOADING, (event, data) => {
@@ -280,6 +363,8 @@
         appendLog(`HLS: Fragment loaded: ${data.frag?.sn}`);
         hasFragLoaded = true;
         setVideoStatus("playing");
+        // 每次載入新片段時更新 live delay
+        updateLiveDelay(hls);
       });
 
       hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
@@ -323,6 +408,26 @@
       };
 
       tryPlay();
+
+      // 定期更新 live delay（每 5 秒檢查一次）
+      const liveDelayUpdateInterval = setInterval(() => {
+        updateLiveDelay(hls);
+      }, 5000);
+
+      // 在 HLS 銷毀時清除定時器
+      const originalDestroy = hls.destroy.bind(hls);
+      hls.destroy = function() {
+        clearInterval(liveDelayUpdateInterval);
+        if (captionTimer) {
+          clearTimeout(captionTimer);
+          captionTimer = null;
+        }
+        pendingCaptions = [];
+        liveDelay = null;
+        lastLiveDelayUpdate = null;
+        originalDestroy();
+      };
+
       return;
     }
 

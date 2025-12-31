@@ -216,6 +216,7 @@ async def ffmpeg_reader(
     stop_timeout = max(1.0, float(cfg.stop_timeout_seconds))
     read_poll_seconds = 1.0
     idle_log_interval = 10.0
+    idle_signaled = False
     while not stop_event.is_set():
         fmt = await fmt_controller.wait_for_format()
         if current_fmt != fmt:
