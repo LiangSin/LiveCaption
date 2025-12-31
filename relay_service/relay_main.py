@@ -191,6 +191,13 @@ def build_ssl_context(cert: str | None) -> ssl.SSLContext | None:
     logger.error("CERT is set but could not be loaded as PEM content or file path")
     raise ssl.SSLError("invalid CERT value; provide PEM content or path to a PEM file")
 
+def clear_audio_queue(audio_queue: AudioQueue):
+    # Clear queue
+    try:
+        while True:
+            audio_queue.queue.get_nowait()
+    except asyncio.QueueEmpty:
+        pass
 
 async def ffmpeg_reader(
     cfg: RelayConfig,
@@ -214,6 +221,7 @@ async def ffmpeg_reader(
         if current_fmt != fmt:
             logger.info("ffmpeg ingest format set to: %s", fmt)
             current_fmt = fmt
+        chunk_counter = 0
         cmd, chunk_bytes = build_ffmpeg_cmd(cfg, fmt)
         logger.info("starting ffmpeg: %s", " ".join(cmd))
         try:
@@ -232,7 +240,6 @@ async def ffmpeg_reader(
         backoff = 1
         last_data_ts = time.monotonic()
         next_idle_log = last_data_ts + idle_log_interval
-        idle_signaled = False
         await broadcaster.broadcast_status("running", "ffmpeg ingest active")
 
         try:
@@ -256,6 +263,11 @@ async def ffmpeg_reader(
                     if now - last_data_ts >= stop_timeout and not idle_signaled:
                         stream_end_event.set()
                         idle_signaled = True
+                        logger.info(
+                            "ffmpeg ingest idle for %.1fs; restarting ingest to reset stream headers",
+                            stop_timeout,
+                        )
+                        break
                     continue
                 if not chunk:
                     if stop_event.is_set():
@@ -361,6 +373,9 @@ async def asr_link(
             ) as ws:
                 stream_started = False
                 ready_to_stop_seen = False
+                # Reset per-connection dedupe state.
+                last_caption = None
+                last_status = None
                 # Expect config message first to learn format.
                 try:
                     config_raw = await asyncio.wait_for(ws.recv(), timeout=5)
@@ -385,6 +400,10 @@ async def asr_link(
                 async def sender(initial_chunk: bytes | None):
                     nonlocal sent_chunks
                     nonlocal stream_started
+
+                    send_budget = max(0.0, float(cfg.send_budget_seconds))
+                    budget_start_ts = time.monotonic()
+
                     chunk = initial_chunk
                     while not stop_event.is_set():
                         if chunk is None:
@@ -407,11 +426,16 @@ async def asr_link(
                             chunk = audio_task.result()
                         await ws.send(chunk)
                         stream_started = True
-                        if debug_mode:
-                            sent_chunks_local = sent_chunks + 1
-                            logger.info("asr-link: sent chunk #%d (%d bytes)", sent_chunks_local, len(chunk))
                         sent_chunks += 1
+                        if debug_mode:
+                            logger.info("asr-link: sent chunk #%d (%d bytes)", sent_chunks, len(chunk))
                         chunk = None
+                        # ---- budget check & yield ----
+                        now = time.monotonic()
+                        if now - budget_start_ts >= send_budget:
+                            # 強制讓出 event loop，讓 receiver / other tasks 跑
+                            await asyncio.sleep(0)
+                            budget_start_ts = time.monotonic()
 
                 async def receiver():
                     nonlocal ready_to_stop_seen, last_status, last_caption
@@ -494,6 +518,8 @@ async def asr_link(
             if debug_mode:
                 logger.info("asr-link: %s", exc)
             backoff = 1
+            pending_chunk = None
+            clear_audio_queue(audio_queue)
             continue
         except Exception as exc:  # noqa: BLE001
             logger.exception("ASR link failed: %s", exc)

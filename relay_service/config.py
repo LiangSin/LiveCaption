@@ -21,6 +21,7 @@ class RelayConfig:
     chunk_ms: int = _env("CHUNK_MS", cast=int, default=500)
     sample_rate: int = _env("SAMPLE_RATE", cast=int, default=16000)
     max_backoff_seconds: int = _env("MAX_BACKOFF_SECONDS", cast=int, default=30)
+    send_budget_seconds: int = _env("SEND_BUDGET_SECONDS", cast=int, default=0.05)
     # How long we tolerate missing audio before signaling stream end and closing the ASR link.
     stop_timeout_seconds: int = _env("STOP_TIMEOUT_SECONDS", cast=int, default=10)
     # Bitrate for opus when using webm.
