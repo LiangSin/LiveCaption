@@ -1,0 +1,37 @@
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "1935:1935"      # RTMP
+      - "8088:8088"      # HLS
+    restart: unless-stopped
+
+  relay_service:
+    build:
+      context: .
+      dockerfile: relay_service/Dockerfile
+    ports:
+      - "9000:9000"     # subtitles
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - relay_service/.env
+    depends_on:
+      - nginx
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "6666:6666"
+    env_file:
+      - frontend/.env
+    depends_on:
+      - relay_service
+      - nginx
+    restart: unless-stopped
+
