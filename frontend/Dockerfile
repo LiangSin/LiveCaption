@@ -8,6 +8,6 @@ WORKDIR /app/frontend
 COPY frontend/ .
 
 # 預設 frontend port（只是文件性質）
-EXPOSE 6666
+EXPOSE 8088
 
-CMD ["python", "-m", "http.server", "6666", "--bind", "0.0.0.0"]
+CMD ["python", "-m", "http.server", "8088", "--bind", "0.0.0.0"]
