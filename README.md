@@ -4,6 +4,9 @@ LiveCaption is a small “relay + web UI” stack for **live captions on a live 
 
 This repository provides:
 
+- **`nginx/`**: an RTMP + HLS server (nginx-rtmp) that
+  - accepts **RTMP ingest** (`rtmp://<host>:1935/live/<stream_key>`)
+  - serves **HLS playback** (`http://<host>:8888/hls/<stream_key>/index.m3u8`)
 - **`relay_service/`**: a Python relay that
   - pulls audio from an **RTMP** stream via **FFmpeg**
   - forwards raw **PCM (s16le, mono)** to an external **ASR WebSocket**
@@ -16,9 +19,7 @@ Not included in this repository:
 
 - The ASR backend itself
 - The streaming source / encoder device
-- The RTMP→HLS (or other browser-playable) packaging pipeline
 
-For a deployment-oriented guide, see `docs/DEPLOY.md`.
 
 ---
 
@@ -35,31 +36,26 @@ Important detail: **browsers cannot play RTMP directly**. Your `RTMP_URL` (relay
 
 ### Prerequisites
 
-- **Linux** (tested on Ubuntu 22.04+)
-- **Python 3.10+**
-- **FFmpeg** installed and accessible on `PATH`
-- A streaming stack that provides:
-  - an **RTMP ingest URL** for the relay to pull audio from
-  - a **browser-playable URL** for the frontend (e.g. HLS `.m3u8`) with correct CORS headers
+- **Docker + Docker Compose v2**
+- (Optional) **FFmpeg** if you want to publish a test stream from your machine
 - An **ASR WebSocket** endpoint that accepts PCM audio and emits JSON caption messages
-
----
-
-### Install (Python deps)
-
-Create a virtual environment and install requirements:
-
-```bash
-conda create -n livecaption python=3.10 -y
-conda activate livecaption
-pip install -r requirements.txt
-```
 
 ---
 
 ### Configuration
 
-Both services can be configured via `.env` files (loaded by the start scripts) or via exported environment variables.
+Docker Compose loads service configuration via `.env` files (`env_file:` in `docker-compose.yml`).
+
+If you change any ports/URLs in `frontend/.env`, re-run `./scripts/set_frontend_config.sh` and rebuild via Docker Compose.
+
+#### Frontend config file (`frontend/config.js`)
+
+The static UI reads runtime settings from `frontend/config.js`:
+
+- `streamUrl`: what the browser plays (HLS `.m3u8` recommended)
+- `relayWsUrl`: where the browser connects for captions (`ws://.../subtitles` or `wss://.../subtitles`)
+
+For Docker Compose, run `scripts/set_frontend_config.sh` to generate `frontend/config.js` and also sync the frontend port/bind settings across `frontend/Dockerfile` and `docker-compose.yml`.
 
 #### Relay service (`relay_service/.env`)
 
@@ -140,7 +136,7 @@ FRONTEND_HOST=0.0.0.0
 FRONTEND_PORT=8000
 
 # What the browser plays (HLS recommended)
-STREAM_URL=http://127.0.0.1:8088/hls/stream1/index.m3u8
+STREAM_URL=http://127.0.0.1:8888/hls/stream1/index.m3u8
 
 # Where the browser connects for captions
 RELAY_WS_URL=ws://127.0.0.1:9000/subtitles
@@ -148,10 +144,15 @@ RELAY_WS_URL=ws://127.0.0.1:9000/subtitles
 
 Notes:
 
-- `scripts/start_frontend.sh` **generates** `frontend/config.js` from these environment variables each time you start it.
+- If you have `frontend/.env.example`, you can start from it:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+- **`scripts/set_frontend_config.sh`** can be used to generate the same `frontend/config.js` and also update Docker port settings to match `.env` (recommended before running Docker Compose).
 - `STREAM_URL` must be reachable by the browser (not just the relay host).
 - `RELAY_WS_URL` must be reachable by the browser; use `wss://` if you are serving the UI over HTTPS.
-- `scripts/start_relay.sh` honors `PYTHON_BIN` if you need a specific Python executable.
 - The UI loads **Hls.js** from a CDN (`https://cdn.jsdelivr.net/...`). If your deployment cannot access external CDNs, you will need to vendor/serve that script yourself.
 
 #### Idle/disconnect behavior
@@ -162,31 +163,64 @@ Notes:
 
 ---
 
-### Run
+### Run (Docker Compose)
 
-Open two terminals.
+This runs: **nginx (RTMP+HLS)**, **relay_service**, and **frontend**.
 
-#### Terminal 1: start the relay service
+Default endpoints exposed by `nginx` in `docker-compose.yml`:
+
+- RTMP ingest: `rtmp://<host>:1935/live`
+- HLS playback: `http://<host>:8888/hls/<stream_key>/index.m3u8`
+
+Publish a test stream to the built-in RTMP server (example using FFmpeg):
 
 ```bash
-conda activate livecaption
-./scripts/start_relay.sh
+# Replace input.mp4 with your own media file
+ffmpeg -re -stream_loop -1 -i input.mp4 -c copy -f flv rtmp://127.0.0.1:1935/live/stream1
 ```
 
-The relay exposes:
+1) Create env files:
 
-- **WebSocket**: `ws://<RELAY_HOST>:<RELAY_PORT>/subtitles`
-- **Health check**: `http://<RELAY_HOST>:<RELAY_PORT>/healthz`
+- `relay_service/.env` (see above)
+- `frontend/.env` (see above; for containers you usually want `FRONTEND_HOST=0.0.0.0`)
 
-#### Terminal 2: start the frontend
+2) Sync frontend config + ports (important):
 
 ```bash
-./scripts/start_frontend.sh
+./scripts/set_frontend_config.sh
+```
+
+This will:
+
+- generate `frontend/config.js` from `frontend/.env`
+- update `frontend/Dockerfile` (`EXPOSE` + `http.server` bind/port)
+- update `docker-compose.yml` frontend `ports:` mapping
+
+Note: re-run this script after you change `FRONTEND_HOST` / `FRONTEND_PORT` / `STREAM_URL` / `RELAY_WS_URL`.
+
+3) Build and run:
+
+```bash
+docker compose up --build
 ```
 
 Then open:
 
 - `http://<FRONTEND_HOST>:<FRONTEND_PORT>/`
+
+Stop:
+
+```bash
+docker compose down
+```
+
+View logs:
+
+```bash
+docker compose logs -f nginx
+docker compose logs -f relay_service
+docker compose logs -f frontend
+```
 
 ---
 
@@ -208,11 +242,19 @@ The frontend automatically reconnects to the subtitle WebSocket and periodically
 - **Frontend shows “no signal” / video won’t play**:
   - Ensure `STREAM_URL` is **browser-playable** (HLS `.m3u8` recommended).
   - Ensure your streaming server sets correct **CORS** headers for the HLS URL.
-- **Relay logs “ffmpeg not found”**:
-  - Install FFmpeg and ensure it is on `PATH`.
 - **Relay connects but no captions appear**:
   - Verify `ASR_WS_URL` is reachable and speaks the expected protocol (config JSON -> audio bytes -> JSON results + `ready_to_stop`).
-  - Check relay logs for “ASR connected” and subsequent ASR messages.
+  - Check logs:
+
+```bash
+docker compose logs -f relay_service
+```
+- **Need to debug ports / config changes**:
+  - Re-run `./scripts/set_frontend_config.sh`, then rebuild:
+
+```bash
+docker compose up --build
+```
 - **Unstable network / frequent reconnects**:
   - Increase `MAX_BACKOFF_SECONDS` to reduce reconnect pressure.
   - Consider increasing `CHUNK_MS` to reduce WebSocket send frequency (higher latency, lower overhead).
