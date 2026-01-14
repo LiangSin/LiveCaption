@@ -1,6 +1,10 @@
 (function () {
   const qs = (id) => document.getElementById(id);
 
+  const appRoot = qs("app");
+  const captionMode = appRoot?.dataset?.captionMode || "original"; // "original" | "translation"
+  const wantTranslation = captionMode === "translation";
+
   const player = qs("player");
   const videoStatus = qs("videoStatus");
   const subtitleStatus = qs("subtitleStatus");
@@ -243,13 +247,38 @@
         return;
       }
 
-      if (payload.type === "caption") {
-        const text = payload.text || "";
-        const isPartial = payload.partial || false;
-        appendLog(`Caption${isPartial ? " (partial)" : ""}: ${text}`);
-        setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
-        scheduleCaption(text, isPartial);
-        return;
+      // Caption routing: main page shows transcription; /translate shows translation.
+      if (!wantTranslation && payload.type === "caption") {
+          const text = payload.text || "";
+          const isPartial = payload.partial || false;
+          appendLog(`Caption${isPartial ? " (partial)" : ""}: ${text}`);
+          setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+          scheduleCaption(text, isPartial);
+          return;
+      }
+
+      if (wantTranslation) {
+        // Preferred: relay emits caption_translation messages.
+        if (payload.type === "caption_translation") {
+          const text = payload.text || "";
+          const isPartial = payload.partial || false;
+          appendLog(`Translation${isPartial ? " (partial)" : ""}: ${text}`);
+          setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+          scheduleCaption(text, isPartial);
+          return;
+        }
+
+        // Fallback: if upstream ever embeds translation in caption payload.
+        if (payload.type === "caption") {
+          const translated = (payload.translation || payload.text_translation || "").toString();
+          if (translated.trim().length > 0) {
+            const isPartial = payload.partial || false;
+            appendLog(`Translation${isPartial ? " (partial)" : ""}: ${translated}`);
+            setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+            scheduleCaption(translated, isPartial);
+            return;
+          }
+        }
       }
 
       if (payload.type === "status") {

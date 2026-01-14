@@ -206,6 +206,7 @@ async def ffmpeg_reader(
     stop_event: asyncio.Event,
     broadcaster: SubtitleBroadcaster,
     stream_end_event: asyncio.Event,
+    restart_ingest_event: asyncio.Event,
     debug_mode: bool = False,
 ):
     """Continuously pull PCM audio from RTMP using FFmpeg; restart on failure."""
@@ -246,6 +247,10 @@ async def ffmpeg_reader(
         try:
             assert process.stdout is not None
             while not stop_event.is_set():
+                if restart_ingest_event.is_set():
+                    restart_ingest_event.clear()
+                    logger.info("ffmpeg ingest restart requested; restarting to reset stream headers")
+                    break
                 if fmt_controller.current != current_fmt:
                     logger.info("ffmpeg format change detected; restarting ingest")
                     raise RuntimeError("format change")
@@ -309,6 +314,7 @@ async def asr_link(
     broadcaster: SubtitleBroadcaster,
     stop_event: asyncio.Event,
     stream_end_event: asyncio.Event,
+    restart_ingest_event: asyncio.Event,
     debug_mode: bool = False,
     ssl_context: ssl.SSLContext | None = None,
 ):
@@ -440,6 +446,7 @@ async def asr_link(
 
                 async def receiver():
                     nonlocal ready_to_stop_seen, last_status, last_caption
+                    last_translation = None
                     async for message in ws:
                         try:
                             payload = json.loads(message)
@@ -476,13 +483,18 @@ async def asr_link(
 
                         lines = payload.get("lines") or []
                         line_text = ""
+                        line_translation = ""
                         if isinstance(lines, list):
                             for line in reversed(lines):
                                 if not isinstance(line, dict):
                                     continue
                                 candidate = (line.get("text") or "").strip()
-                                if candidate:
+                                if candidate and not line_text:
                                     line_text = candidate
+                                candidate_tr = (line.get("translation") or line.get("text_translation") or "").strip()
+                                if candidate_tr and not line_translation:
+                                    line_translation = candidate_tr
+                                if line_text and line_translation:
                                     break
                         buffer_text = (payload.get("buffer_transcription") or "").strip()
                         text = " ".join(part for part in (line_text, buffer_text) if part).strip()
@@ -499,6 +511,22 @@ async def asr_link(
                                     }
                                 )
                                 last_caption = caption_key
+
+                        buffer_tr = (payload.get("buffer_translation") or "").strip()
+                        tr_text = " ".join(part for part in (line_translation, buffer_tr) if part).strip()
+                        if tr_text:
+                            tr_partial = bool(buffer_tr)
+                            tr_key = (tr_text, tr_partial)
+                            if tr_key != last_translation:
+                                await broadcaster.broadcast(
+                                    {
+                                        "type": "caption_translation",
+                                        "text": tr_text,
+                                        "partial": tr_partial,
+                                        "ts": payload["ts"],
+                                    }
+                                )
+                                last_translation = tr_key
 
                 sender_task = asyncio.create_task(sender(first_chunk))
                 receiver_task = asyncio.create_task(receiver())
@@ -521,6 +549,25 @@ async def asr_link(
             backoff = 1
             pending_chunk = None
             clear_audio_queue(audio_queue)
+            continue
+        except (
+            websockets.exceptions.ConnectionClosedError,
+            ConnectionRefusedError,
+        ) as exc:
+            # Treat "ASR went away" as a normal session end:
+            # clear buffered audio and return to the "waiting for audio" state.
+            #
+            # This is especially important when streaming WebM/Opus: reconnecting
+            # with a mid-stream chunk (missing container headers) commonly fails.
+            logger.exception("ASR disconnected: %s", exc)
+            await broadcaster.broadcast_status("waiting", f"ASR disconnected: {exc}")
+            backoff = 1
+            pending_chunk = None
+            clear_audio_queue(audio_queue)
+            # Restart ffmpeg so the next chunk begins with fresh container headers.
+            restart_ingest_event.set()
+            # Small delay to avoid a tight reconnect loop while ASR is down.
+            await asyncio.sleep(1)
             continue
         except Exception as exc:  # noqa: BLE001
             logger.exception("ASR link failed: %s", exc)
@@ -545,15 +592,35 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
     fmt_controller = FormatController("webm")
     stop_event = asyncio.Event()
     stream_end_event = asyncio.Event()
+    restart_ingest_event = asyncio.Event()
     ssl_context = build_ssl_context(cfg.cert)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.ffmpeg_task = asyncio.create_task(
-            ffmpeg_reader(cfg, audio_queue, fmt_controller, stop_event, broadcaster, stream_end_event, debug_mode)
+            ffmpeg_reader(
+                cfg,
+                audio_queue,
+                fmt_controller,
+                stop_event,
+                broadcaster,
+                stream_end_event,
+                restart_ingest_event,
+                debug_mode,
+            )
         )
         app.state.asr_task = asyncio.create_task(
-            asr_link(cfg, audio_queue, fmt_controller, broadcaster, stop_event, stream_end_event, debug_mode, ssl_context)
+            asr_link(
+                cfg,
+                audio_queue,
+                fmt_controller,
+                broadcaster,
+                stop_event,
+                stream_end_event,
+                restart_ingest_event,
+                debug_mode,
+                ssl_context,
+            )
         )
         logger.info("relay startup complete")
         try:
