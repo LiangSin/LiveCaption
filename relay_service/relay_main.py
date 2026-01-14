@@ -78,12 +78,14 @@ class AudioQueue:
     """Bounded queue to avoid unbounded memory growth."""
 
     def __init__(self, max_chunks: int = 100):
-        self.queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=max_chunks)
+        # Each item is (ingest_epoch, chunk). Epoch increments every time ffmpeg restarts,
+        # so downstream can reliably detect fresh container headers after reconnects.
+        self.queue: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue(maxsize=max_chunks)
         self._dropped = 0
 
-    async def put(self, chunk: bytes):
+    async def put(self, item: tuple[int, bytes]):
         try:
-            self.queue.put_nowait(chunk)
+            self.queue.put_nowait(item)
         except asyncio.QueueFull:
             self._dropped += 1
             if self._dropped % 50 == 1:
@@ -91,6 +93,34 @@ class AudioQueue:
 
     async def get(self):
         return await self.queue.get()
+
+
+class IngestEpoch:
+    """Monotonically increasing epoch; bumps whenever ffmpeg (re)starts."""
+
+    def __init__(self) -> None:
+        self._value = 0
+        self._cond = asyncio.Condition()
+
+    async def get(self) -> int:
+        async with self._cond:
+            return self._value
+
+    async def bump(self) -> int:
+        async with self._cond:
+            self._value += 1
+            self._cond.notify_all()
+            return self._value
+
+    async def wait_for_change(self, prev: int, timeout: float | None = None) -> int:
+        async def _wait() -> int:
+            async with self._cond:
+                await self._cond.wait_for(lambda: self._value != prev)
+                return self._value
+
+        if timeout is None:
+            return await _wait()
+        return await asyncio.wait_for(_wait(), timeout=timeout)
 
 
 class FormatController:
@@ -203,6 +233,7 @@ async def ffmpeg_reader(
     cfg: RelayConfig,
     audio_queue: AudioQueue,
     fmt_controller: FormatController,
+    ingest_epoch: IngestEpoch,
     stop_event: asyncio.Event,
     broadcaster: SubtitleBroadcaster,
     stream_end_event: asyncio.Event,
@@ -240,9 +271,12 @@ async def ffmpeg_reader(
             continue
 
         backoff = 1
+        epoch = await ingest_epoch.bump()
         last_data_ts = time.monotonic()
         next_idle_log = last_data_ts + idle_log_interval
         await broadcaster.broadcast_status("running", "ffmpeg ingest active")
+        logger.info("ffmpeg ingest epoch=%d", epoch)
+        skip_sleep = False
 
         try:
             assert process.stdout is not None
@@ -250,6 +284,7 @@ async def ffmpeg_reader(
                 if restart_ingest_event.is_set():
                     restart_ingest_event.clear()
                     logger.info("ffmpeg ingest restart requested; restarting to reset stream headers")
+                    skip_sleep = True
                     break
                 if fmt_controller.current != current_fmt:
                     logger.info("ffmpeg format change detected; restarting ingest")
@@ -286,7 +321,7 @@ async def ffmpeg_reader(
                 if stream_end_event.is_set():
                     stream_end_event.clear()
                 idle_signaled = False
-                await audio_queue.put(chunk)
+                await audio_queue.put((epoch, chunk))
                 if debug_mode:
                     chunk_counter += 1
                     logger.info("ffmpeg->queue: chunk #%d (%d bytes)", chunk_counter, len(chunk))
@@ -303,14 +338,18 @@ async def ffmpeg_reader(
             if process.returncode is None:
                 process.kill()
                 await process.wait()
-            await asyncio.sleep(min(backoff, cfg.max_backoff_seconds))
-            backoff = min(backoff * 2, cfg.max_backoff_seconds)
+            if not skip_sleep:
+                await asyncio.sleep(min(backoff, cfg.max_backoff_seconds))
+                backoff = min(backoff * 2, cfg.max_backoff_seconds)
+            else:
+                backoff = 1
 
 
 async def asr_link(
     cfg: RelayConfig,
     audio_queue: AudioQueue,
     fmt_controller: FormatController,
+    ingest_epoch: IngestEpoch,
     broadcaster: SubtitleBroadcaster,
     stop_event: asyncio.Event,
     stream_end_event: asyncio.Event,
@@ -326,7 +365,7 @@ async def asr_link(
     instead of a user action.
     """
     backoff = 1
-    pending_chunk: bytes | None = None
+    pending_item: tuple[int, bytes] | None = None
     stop_timeout = max(1.0, float(cfg.stop_timeout_seconds))
     sent_chunks = 0
     last_status: str | None = None
@@ -355,6 +394,27 @@ async def asr_link(
                 continue
             if payload.get("type") == "ready_to_stop":
                 break
+
+    async def reset_to_initial_state(reason: str, restart_ingest: bool) -> None:
+        """
+        Reset link state as if we never connected to ASR.
+
+        - Drop any pending audio (mid-stream chunks are unsafe after reconnects).
+        - Clear audio queue to force a clean start.
+        - Optionally restart ffmpeg ingest so the next audio begins with fresh headers.
+        """
+        nonlocal pending_item
+        if debug_mode:
+            logger.info("asr-link reset: %s (restart_ingest=%s)", reason, restart_ingest)
+        pending_item = None
+        clear_audio_queue(audio_queue)
+        # Return to initial controller state; ASR config will set it again on connect.
+        fmt_controller.set("webm")
+        # Make sure "stream ended" doesn't pin us into a closed state after a disconnect.
+        if stream_end_event.is_set():
+            stream_end_event.clear()
+        if restart_ingest:
+            restart_ingest_event.set()
     while not stop_event.is_set():
         ws = None
         stream_started = False
@@ -362,10 +422,10 @@ async def asr_link(
         # Wait for audio before attempting to open the ASR link. This avoids
         # connecting with an empty stream, which some ASR backends treat as an
         # error/timeout.
-        if pending_chunk is None:
-            pending_chunk = await audio_queue.get()
+        if pending_item is None:
+            pending_item = await audio_queue.get()
             if debug_mode:
-                logger.info("asr-link: first audio chunk ready (%d bytes)", len(pending_chunk))
+                logger.info("asr-link: first audio chunk ready (%d bytes)", len(pending_item[1]))
 
         try:
             logger.info("connecting to ASR at %s", cfg.asr_ws_url)
@@ -400,8 +460,22 @@ async def asr_link(
                     )
                 await broadcaster.broadcast_status("running", "ASR connected")
                 backoff = 1
-                first_chunk = pending_chunk
-                pending_chunk = None
+                # For WebM, force fresh container headers for every ASR connection.
+                # Reconnecting with mid-stream WebM chunks (missing init headers) commonly fails.
+                if fmt == "webm":
+                    prev_epoch = await ingest_epoch.get()
+                    restart_ingest_event.set()
+                    try:
+                        await ingest_epoch.wait_for_change(prev_epoch, timeout=5.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("ffmpeg ingest restart did not complete within 5s; proceeding anyway")
+                    clear_audio_queue(audio_queue)
+                    pending_item = None
+
+                if pending_item is None:
+                    pending_item = await audio_queue.get()
+                _, first_chunk = pending_item
+                pending_item = None
                 sent_chunks = 0
 
                 async def sender(initial_chunk: bytes | None):
@@ -430,7 +504,7 @@ async def asr_link(
                                 raise NoAudioTimeout("audio signal stopped; closing ASR link")
                             if end_task in done:
                                 raise NoAudioTimeout("audio stream ended; closing ASR link")
-                            chunk = audio_task.result()
+                            _, chunk = audio_task.result()
                         await ws.send(chunk)
                         stream_started = True
                         sent_chunks += 1
@@ -547,8 +621,7 @@ async def asr_link(
             if debug_mode:
                 logger.info("asr-link: %s", exc)
             backoff = 1
-            pending_chunk = None
-            clear_audio_queue(audio_queue)
+            await reset_to_initial_state(str(exc), restart_ingest=False)
             continue
         except (
             websockets.exceptions.ConnectionClosedError,
@@ -562,10 +635,9 @@ async def asr_link(
             logger.exception("ASR disconnected: %s", exc)
             await broadcaster.broadcast_status("waiting", f"ASR disconnected: {exc}")
             backoff = 1
-            pending_chunk = None
-            clear_audio_queue(audio_queue)
-            # Restart ffmpeg so the next chunk begins with fresh container headers.
-            restart_ingest_event.set()
+            # Reset as if we never connected, and restart ingest so next audio begins
+            # with fresh headers for the new ASR connection.
+            await reset_to_initial_state(f"ASR disconnected: {exc}", restart_ingest=True)
             # Small delay to avoid a tight reconnect loop while ASR is down.
             await asyncio.sleep(1)
             continue
@@ -590,6 +662,7 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
     broadcaster = SubtitleBroadcaster()
     audio_queue = AudioQueue()
     fmt_controller = FormatController("webm")
+    ingest_epoch = IngestEpoch()
     stop_event = asyncio.Event()
     stream_end_event = asyncio.Event()
     restart_ingest_event = asyncio.Event()
@@ -602,6 +675,7 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
                 cfg,
                 audio_queue,
                 fmt_controller,
+                ingest_epoch,
                 stop_event,
                 broadcaster,
                 stream_end_event,
@@ -614,6 +688,7 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
                 cfg,
                 audio_queue,
                 fmt_controller,
+                ingest_epoch,
                 broadcaster,
                 stop_event,
                 stream_end_event,
