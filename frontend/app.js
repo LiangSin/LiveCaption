@@ -503,7 +503,12 @@
 
     // Auto start; reconnections are automatic inside loaders/handlers.
     loadStream();
-    connectWs();
+
+    // Delay initial relay_service WebSocket connection after page load/refresh.
+    // (Reconnections from ws.onclose keep using their own backoff timing.)
+    const initialWsConnectDelayMs = 2000;
+    appendLog(`Delaying subtitles WS connect for ${initialWsConnectDelayMs}ms...`);
+    setTimeout(() => connectWs(), initialWsConnectDelayMs);
   }
 
   // 開始等待配置載入
