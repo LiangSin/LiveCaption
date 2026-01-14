@@ -6,6 +6,8 @@ services:
     ports:
       - "1935:1935"      # RTMP
       - "8888:8888"      # HLS
+    volumes:
+      - ./ssl-config:/etc/nginx/ssl:ro
     restart: unless-stopped
 
   relay_service:
@@ -28,6 +30,8 @@ services:
       dockerfile: frontend/Dockerfile
     ports:
       - "8088:8088"
+    volumes:
+      - ./ssl-config:/ssl-config:ro
     env_file:
       - frontend/.env
     depends_on:

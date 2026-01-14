@@ -136,7 +136,7 @@ FRONTEND_HOST=0.0.0.0
 FRONTEND_PORT=8000
 
 # What the browser plays (HLS recommended)
-STREAM_URL=http://127.0.0.1:8888/hls/stream1/index.m3u8
+STREAM_URL=https://127.0.0.1:8888/hls/stream1/index.m3u8
 
 # Where the browser connects for captions
 RELAY_WS_URL=ws://127.0.0.1:9000/subtitles
@@ -170,7 +170,7 @@ This runs: **nginx (RTMP+HLS)**, **relay_service**, and **frontend**.
 Default endpoints exposed by `nginx` in `docker-compose.yml`:
 
 - RTMP ingest: `rtmp://<host>:1935/live`
-- HLS playback: `http://<host>:8888/hls/<stream_key>/index.m3u8`
+- HLS playback: `https://<host>:8888/hls/<stream_key>/index.m3u8`
 
 Publish a test stream to the built-in RTMP server (example using FFmpeg):
 

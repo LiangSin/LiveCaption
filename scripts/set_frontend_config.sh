@@ -35,11 +35,16 @@ require_var FRONTEND_PORT
 
 CONFIG_JS="$FRONTEND_DIR/config.js"
 echo "[set_frontend_config] Writing $CONFIG_JS"
+
+# If the UI is served over HTTPS, browsers block http:// and ws:// as mixed content.
+# Auto-upgrade config to secure schemes.
+STREAM_URL_SECURE="${STREAM_URL/http:\/\//https:\/\/}"
+RELAY_WS_URL_SECURE="${RELAY_WS_URL/ws:\/\//wss:\/\/}"
 cat >"$CONFIG_JS" <<EOF
 
 window.FRONTEND_CONFIG = {
-  streamUrl: "$STREAM_URL",
-  relayWsUrl: "$RELAY_WS_URL"
+  streamUrl: "$STREAM_URL_SECURE",
+  relayWsUrl: "$RELAY_WS_URL_SECURE"
 };
 
 EOF
@@ -53,7 +58,7 @@ fi
 echo "[set_frontend_config] Patching $DOCKERFILE (EXPOSE/CMD)"
 sed -i -E \
   -e "s/^([[:space:]]*EXPOSE[[:space:]]+)[0-9]+([[:space:]]*)$/\1${FRONTEND_PORT}\2/" \
-  -e "s/(http\\.server\", \")[0-9]+(\")/\1${FRONTEND_PORT}\2/" \
+  -e "s/(--port\", \")[0-9]+(\")/\1${FRONTEND_PORT}\2/" \
   -e "s/(--bind\", \")[^\"]+(\")/\1${FRONTEND_HOST}\2/" \
   "$DOCKERFILE"
 
