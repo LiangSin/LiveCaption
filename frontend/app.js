@@ -430,13 +430,16 @@
     if (useHlsJs) {
       const hls = new window.Hls({
         lowLatencyMode: true,
-        liveSyncDuration: 3, // time difference between live edge and player current time
-        liveMaxLatencyDuration: 7, // maximum tolerance for live edge
+        liveSyncDuration: 0.5, // time difference between live edge and player current time
+        liveMaxLatencyDuration: 2, // maximum tolerance for live edge
         maxLiveSyncPlaybackRate: 1,
         liveDurationInfinity: true,
-        maxBufferLength: 6,
-        maxMaxBufferLength: 12,
-        backBufferLength: 3,
+        maxBufferLength: 3,
+        maxMaxBufferLength: 6,
+        highBufferWatchdogPeriod: 1,
+        maxBufferHole: 0.3,
+        maxFragLookUpTolerance: 0.1,
+        backBufferLength: 0,
         maxRetries: 6,
         startLevel: -1,
         enableWorker: true,

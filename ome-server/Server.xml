@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Server version="8">
+    <Name>OvenMediaEngine</Name>
+    <Type>origin</Type>
+    <IP>*</IP>
+
+    <Modules>
+		<LLHLS>
+			<Enable>true</Enable>
+		</LLHLS>
+	</Modules>
+
+    <Bind>
+        <Providers>
+            <RTMP>
+                <Port>1935</Port>
+            </RTMP>
+        </Providers>
+        <Publishers>
+            <LLHLS>
+                <TLSPort>8888</TLSPort>
+            </LLHLS>
+        </Publishers>
+    </Bind>
+
+    <VirtualHosts>
+        <VirtualHost>
+            <Name>default</Name>
+            <Host>
+				<Names>
+					<Name>*</Name>
+				</Names>
+				<TLS>
+					<CertPath>/opt/ovenmediaengine/bin/ssl-config/cert.pem</CertPath>
+					<KeyPath>/opt/ovenmediaengine/bin/ssl-config/key.pem</KeyPath>
+				</TLS>
+			</Host>
+
+            <Applications>                
+                <Application>
+                    <Name>live</Name>
+                    <Type>live</Type>
+                    <OutputProfiles>
+                        <OutputProfile>
+                            <Name>bypass</Name>
+                            <OutputStreamName>${OriginStreamName}</OutputStreamName>
+                            <Encodes>
+                                <Video>
+                                    <Bypass>true</Bypass>
+                                </Video>
+                                <Audio>
+                                    <Bypass>true</Bypass>
+                                </Audio>
+                            </Encodes>
+                        </OutputProfile>
+                    </OutputProfiles>
+                    <Providers>
+                        <RTMP />
+                    </Providers>
+                    <Publishers>
+                        <LLHLS>
+                            <ChunkDuration>0.2</ChunkDuration>
+                            <SegmentDuration>2</SegmentDuration>
+                            <SegmentCount>3</SegmentCount>
+                            <CrossDomains>
+                                <Url>*</Url>
+                            </CrossDomains>
+                        </LLHLS>
+                    </Publishers>
+                </Application>
+            </Applications>
+        </VirtualHost>
+    </VirtualHosts>
+</Server>
