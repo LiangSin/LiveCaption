@@ -35,11 +35,18 @@ class SubtitleBroadcaster:
     def __init__(self) -> None:
         self._clients: Set[WebSocket] = set()
         self._lock = asyncio.Lock()
+        self._last_asr_status: dict | None = None
 
     async def register(self, ws: WebSocket):
         async with self._lock:
             self._clients.add(ws)
         logger.info("frontend connected (%d total)", len(self._clients))
+        # Immediately send the latest ASR connection state to the newly connected client.
+        if self._last_asr_status is not None:
+            try:
+                await ws.send_text(json.dumps(self._last_asr_status))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("failed to send initial asr_status to %s: %s", ws.client, exc)
 
     async def unregister(self, ws: WebSocket):
         async with self._lock:
@@ -72,6 +79,23 @@ class SubtitleBroadcaster:
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
         )
+
+    async def broadcast_asr_status(self, state: str, detail: str = ""):
+        # Dedupe identical updates to avoid spamming clients.
+        if (
+            self._last_asr_status is not None
+            and self._last_asr_status.get("state") == state
+            and self._last_asr_status.get("detail") == detail
+        ):
+            return
+        payload = {
+            "type": "asr_status",
+            "state": state,
+            "detail": detail,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        self._last_asr_status = payload
+        await self.broadcast(payload)
 
 
 class AudioQueue:
@@ -429,6 +453,7 @@ async def asr_link(
 
         try:
             logger.info("connecting to ASR at %s", cfg.asr_ws_url)
+            await broadcaster.broadcast_asr_status("connecting", "connecting to ASR backend")
             ssl_ctx = ssl_context if cfg.asr_ws_url.startswith("wss://") else None
             async with websockets.connect(
                 cfg.asr_ws_url,
@@ -459,6 +484,7 @@ async def asr_link(
                         "asr-link: config received useAudioWorklet=%s => format=%s", use_worklet, fmt
                     )
                 await broadcaster.broadcast_status("running", "ASR connected")
+                await broadcaster.broadcast_asr_status("connected", "ASR backend connected")
                 backoff = 1
                 # For WebM, force fresh container headers for every ASR connection.
                 # Reconnecting with mid-stream WebM chunks (missing init headers) commonly fails.
@@ -621,6 +647,7 @@ async def asr_link(
             if debug_mode:
                 logger.info("asr-link: %s", exc)
             backoff = 1
+            await broadcaster.broadcast_asr_status("disconnected", "ASR link closed (no audio)")
             await reset_to_initial_state(str(exc), restart_ingest=False)
             continue
         except (
@@ -634,6 +661,7 @@ async def asr_link(
             # with a mid-stream chunk (missing container headers) commonly fails.
             logger.exception("ASR disconnected: %s", exc)
             await broadcaster.broadcast_status("waiting", f"ASR disconnected: {exc}")
+            await broadcaster.broadcast_asr_status("disconnected", f"ASR disconnected: {exc}")
             backoff = 1
             # Reset as if we never connected, and restart ingest so next audio begins
             # with fresh headers for the new ASR connection.
@@ -644,6 +672,7 @@ async def asr_link(
         except Exception as exc:  # noqa: BLE001
             logger.exception("ASR link failed: %s", exc)
             await broadcaster.broadcast_status("error", f"ASR link failed: {exc}")
+            await broadcaster.broadcast_asr_status("error", f"ASR link error: {exc}")
             await asyncio.sleep(min(backoff, cfg.max_backoff_seconds))
             backoff = min(backoff * 2, cfg.max_backoff_seconds)
         finally:
@@ -670,6 +699,8 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Initial ASR state: not connected until audio arrives and link is established.
+        await broadcaster.broadcast_asr_status("disconnected", "initial")
         app.state.ffmpeg_task = asyncio.create_task(
             ffmpeg_reader(
                 cfg,
@@ -702,6 +733,7 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
             yield
         finally:
             stop_event.set()
+            await broadcaster.broadcast_asr_status("disconnected", "relay shutting down")
             tasks = [app.state.ffmpeg_task, app.state.asr_task]
             for t in tasks:
                 t.cancel()

@@ -50,7 +50,8 @@
     const caption = document.createElement("div");
     caption.id = "caption";
     caption.className = "caption";
-    caption.textContent = "Waiting for subtitles…";
+    // When connected but no valid subtitles, show nothing (empty string).
+    caption.textContent = "";
 
     if (options.overlay) {
       caption.classList.add("caption--overlay");

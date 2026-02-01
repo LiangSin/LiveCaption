@@ -40,6 +40,12 @@
     let lastLiveDelayUpdate = null; // 上次更新 liveDelay 的時間
     let pendingCaptions = []; // 待顯示的字幕隊列
     let captionTimer = null; // 字幕顯示計時器
+    // Subtitle rendering state (driven by ASR backend connection state).
+    let asrState = "disconnected"; // "connected" | "connecting" | "disconnected" | "error"
+    let lastCaptionText = ""; // last non-empty caption shown
+    let lastCaptionAt = null; // ms epoch when last non-empty caption was shown
+    let captionStaleTimer = null;
+    const CAPTION_STALE_MS = 60 * 1000;
 
     function appendLog(message) {
     const ts = new Date().toISOString();
@@ -106,6 +112,14 @@
 
   // 添加字幕到隊列（帶延遲）
   function scheduleCaption(text, isPartial) {
+    // If ASR isn't connected, do not schedule captions.
+    if (asrState !== "connected") return;
+
+    const normalized = (text ?? "").toString();
+    if (normalized.trim().length === 0) {
+      // No valid subtitle: keep UI empty (do not overwrite previous caption).
+      return;
+    }
     const receiveTime = Date.now();
     const delay = liveDelay !== null ? liveDelay : 0;
     const displayTime = receiveTime + delay;
@@ -121,7 +135,7 @@
     }
 
     pendingCaptions.push({
-      text,
+      text: normalized,
       isPartial,
       receiveTime,
       displayTime
@@ -133,20 +147,6 @@
 
     function setSubtitleStatus(text) {
       if (subtitleStatus) subtitleStatus.textContent = text;
-
-      // 根據狀態更新字幕顯示
-      const hasSignal = text === "receiving" || text === "receiving (partial)" || text === "connected";
-      if (captionEl) {
-        if (hasSignal) {
-          // 有訊號時顯示正常字幕（如果沒有字幕就顯示等待）
-          if (captionEl.textContent === "No signal") {
-            captionEl.textContent = "Waiting for subtitles…";
-          }
-        } else {
-          // 沒有訊號時顯示 "No signal"
-          captionEl.textContent = "No signal";
-        }
-      }
     }
 
     function setVideoStatus(text) {
@@ -160,17 +160,69 @@
 
   function setCaption(text) {
     if (!captionEl) return;
-    
+    // Never show captions while ASR is not connected.
+    if (asrState !== "connected") return;
+
     // 檢查是否已經滾動到底部（或接近底部，允許 5px 的誤差）
     const isAtBottom = captionEl.scrollHeight - captionEl.scrollTop - captionEl.clientHeight <= 5;
-    
-    // 更新文字內容
-    captionEl.textContent = text || "—";
-    
+
+    const normalized = (text ?? "").toString();
+    captionEl.textContent = normalized;
+
+    // Track freshness only for non-empty captions.
+    if (normalized.trim().length > 0) {
+      lastCaptionText = normalized;
+      lastCaptionAt = Date.now();
+      scheduleCaptionStaleCheck();
+    }
+
     // 如果之前在底部，則自動滾動到新的底部
     if (isAtBottom) {
       captionEl.scrollTop = captionEl.scrollHeight;
     }
+  }
+
+  function renderCaptionState() {
+    if (!captionEl) return;
+
+    if (asrState !== "connected") {
+      captionEl.textContent = "No signal";
+      return;
+    }
+
+    // Connected: show last caption if any; otherwise show nothing.
+    captionEl.textContent = lastCaptionText || "";
+  }
+
+  function scheduleCaptionStaleCheck() {
+    if (captionStaleTimer) {
+      clearTimeout(captionStaleTimer);
+      captionStaleTimer = null;
+    }
+    if (asrState !== "connected") return;
+    if (!lastCaptionAt) return;
+
+    const elapsed = Date.now() - lastCaptionAt;
+    const remaining = Math.max(0, CAPTION_STALE_MS - elapsed);
+    captionStaleTimer = setTimeout(() => {
+      if (asrState !== "connected") {
+        renderCaptionState();
+        return;
+      }
+      if (!lastCaptionAt) return;
+      if (Date.now() - lastCaptionAt >= CAPTION_STALE_MS) {
+        // Stale: clear caption (connected but no valid subtitle recently).
+        lastCaptionText = "";
+        lastCaptionAt = null;
+        // Only clear UI if nothing is scheduled to appear imminently.
+        if (!pendingCaptions || pendingCaptions.length === 0) {
+          captionEl.textContent = "";
+        }
+      } else {
+        // Drift: reschedule with updated remaining time.
+        scheduleCaptionStaleCheck();
+      }
+    }, remaining);
   }
 
   function scheduleIdleNotice() {
@@ -180,7 +232,6 @@
         ? ((Date.now() - lastWsMessage) / 1000).toFixed(1)
         : "no messages yet";
       appendLog(`No subtitles/status received (${waited}); waiting for signal.`);
-      setSubtitleStatus("waiting for signal");
       scheduleIdleNotice();
     }, 8000);
   }
@@ -224,6 +275,20 @@
     ws.onclose = (evt) => {
       appendLog(`Subtitle WS closed (code=${evt.code}, reason=${evt.reason || "none"})`);
       setSubtitleStatus("disconnected");
+      // Without relay connection, treat ASR as disconnected from the UI's perspective.
+      asrState = "disconnected";
+      lastCaptionText = "";
+      lastCaptionAt = null;
+      if (captionStaleTimer) {
+        clearTimeout(captionStaleTimer);
+        captionStaleTimer = null;
+      }
+      pendingCaptions = [];
+      if (captionTimer) {
+        clearTimeout(captionTimer);
+        captionTimer = null;
+      }
+      renderCaptionState();
       scheduleIdleNotice();
       const delay = Math.min(wsBackoff, 15000);
       wsBackoff = Math.min(wsBackoff * 2, 15000);
@@ -247,10 +312,43 @@
         return;
       }
 
+      // ASR backend connection status (from relay_service).
+      if (payload.type === "asr_status") {
+        const next = (payload.state || "disconnected").toString();
+        const detail = (payload.detail || "").toString();
+        appendLog(`ASR status: ${next}${detail ? ` (${detail})` : ""}`);
+        asrState = next;
+        setSubtitleStatus(`asr:${next}`);
+        if (asrState !== "connected") {
+          // Reset caption state when ASR is not connected.
+          lastCaptionText = "";
+          lastCaptionAt = null;
+          if (captionStaleTimer) {
+            clearTimeout(captionStaleTimer);
+            captionStaleTimer = null;
+          }
+          pendingCaptions = [];
+          if (captionTimer) {
+            clearTimeout(captionTimer);
+            captionTimer = null;
+          }
+        } else {
+          // Connected: show last caption (or empty) and start stale timer if needed.
+          scheduleCaptionStaleCheck();
+        }
+        renderCaptionState();
+        return;
+      }
+
       // Caption routing: main page shows transcription; /translate shows translation.
       if (!wantTranslation && payload.type === "caption") {
           const text = payload.text || "";
           const isPartial = payload.partial || false;
+          if (text.toString().trim().length === 0) {
+            // Connected but no valid subtitle: show nothing and keep last caption (until stale timeout).
+            setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+            return;
+          }
           appendLog(`Caption${isPartial ? " (partial)" : ""}: ${text}`);
           setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
           scheduleCaption(text, isPartial);
@@ -262,6 +360,10 @@
         if (payload.type === "caption_translation") {
           const text = payload.text || "";
           const isPartial = payload.partial || false;
+          if (text.toString().trim().length === 0) {
+            setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+            return;
+          }
           appendLog(`Translation${isPartial ? " (partial)" : ""}: ${text}`);
           setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
           scheduleCaption(text, isPartial);
