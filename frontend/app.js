@@ -485,16 +485,16 @@
         updateLiveDelay(hls);
       });
 
-      hls.on(window.Hls.Events.LEVEL_LOADING, (event, data) => {
-        appendLog(`HLS: Loading level ${data.level}`);
-      });
+      // hls.on(window.Hls.Events.LEVEL_LOADING, (event, data) => {
+      //   appendLog(`HLS: Loading level ${data.level}`);
+      // });
 
-      hls.on(window.Hls.Events.FRAG_LOADING, (event, data) => {
-        appendLog(`HLS: Loading fragment ${data.frag?.sn}`);
-      });
+      // hls.on(window.Hls.Events.FRAG_LOADING, (event, data) => {
+      //   appendLog(`HLS: Loading fragment ${data.frag?.sn}`);
+      // });
 
       hls.on(window.Hls.Events.FRAG_LOADED, (event, data) => {
-        appendLog(`HLS: Fragment loaded: ${data.frag?.sn}`);
+        // appendLog(`HLS: Fragment loaded: ${data.frag?.sn}`);
         hasFragLoaded = true;
         setVideoStatus("playing");
         // 每次載入新片段時更新 live delay
