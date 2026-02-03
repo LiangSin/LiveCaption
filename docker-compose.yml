@@ -1,8 +1,6 @@
 services:
   ome:
-    build:
-      context: .
-      dockerfile: ome-server/Dockerfile
+    image: airensoft/ovenmediaengine:latest
     environment:
       OME_HOST_IP: 140.112.91.219
     volumes:
@@ -11,9 +9,7 @@ services:
     restart: unless-stopped
 
   nginx:
-    build:
-      context: .
-      dockerfile: nginx/Dockerfile
+    image: tiangolo/nginx-rtmp:latest
     ports:
       - "1935:1935"      # RTMP
       - "8088:8088"      # Frontend
@@ -23,6 +19,7 @@ services:
       - frontend
     volumes:
       - ./ssl-config:/etc/nginx/ssl:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
     restart: unless-stopped
 
   relay_service:

@@ -1,1 +1,0 @@
-FROM airensoft/ovenmediaengine:latest
