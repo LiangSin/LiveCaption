@@ -6,11 +6,20 @@ services:
     environment:
       OME_HOST_IP: 140.112.91.219
     ports:
-      - "1935:1935"      # RTMP
       - "8888:8888"      # HLS
     volumes:
       - ./ome-server/Server.xml:/opt/ovenmediaengine/bin/origin_conf/Server.xml
       - ./ssl-config/:/opt/ovenmediaengine/bin/ssl-config/
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "1935:1935"      # RTMP
+    depends_on:
+      - ome
     restart: unless-stopped
 
   relay_service:
@@ -24,7 +33,7 @@ services:
     env_file:
       - relay_service/.env
     depends_on:
-      - ome
+      - nginx
     restart: unless-stopped
 
   frontend:

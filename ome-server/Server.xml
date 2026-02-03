@@ -13,7 +13,7 @@
     <Bind>
         <Providers>
             <RTMP>
-                <Port>1935</Port>
+                <Port>1936</Port>
             </RTMP>
         </Providers>
         <Publishers>
