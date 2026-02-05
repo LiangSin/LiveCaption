@@ -7,7 +7,7 @@ This repository provides:
 - **`nginx/`**: a reverse proxy that
   - accepts **RTMP ingest** from streaming sources
   - forwards internal services (OME playback, relay WebSocket, web UI) to external clients
-- **ome-server**: a media server (OvenMediaEngine) that
+- **`ome-server/`**: a media server (OvenMediaEngine) that
   - transcodes RTMP input to **LL-HLS** for browser playback
 - **`relay_service/`**: a Python relay that
   - pulls audio from an **RTMP** stream via FFmpeg
