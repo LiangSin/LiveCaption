@@ -4,16 +4,20 @@ LiveCaption is a small “relay + web UI” stack for **live captions on a live 
 
 This repository provides:
 
-- **`nginx/`**: an RTMP + HLS server (nginx-rtmp) that
-  - accepts **RTMP ingest** (`rtmp://<host>:1935/live/<stream_key>`)
-  - serves **HLS playback** (`http://<host>:8888/hls/<stream_key>/index.m3u8`)
+- **`nginx/`**: a reverse proxy that
+  - accepts **RTMP ingest** from streaming sources
+  - forwards internal services (OME playback, relay WebSocket, web UI) to external clients
+- **ome-server**: a media server (OvenMediaEngine) that
+  - transcodes RTMP input to **LL-HLS** for browser playback
 - **`relay_service/`**: a Python relay that
-  - pulls audio from an **RTMP** stream via **FFmpeg**
-  - forwards raw **PCM (s16le, mono)** to an external **ASR WebSocket**
+  - pulls audio from an **RTMP** stream via FFmpeg
+  - forwards audio to an external **ASR WebSocket**
   - relays caption/status messages to browsers via a **WebSocket** endpoint (`/subtitles`)
 - **`frontend/`**: a static web UI that
-  - plays a browser-compatible stream URL (typically **HLS `.m3u8`**)
-  - connects to the relay’s `/subtitles` WebSocket and displays captions + status
+  - plays the live stream and displays real-time captions
+  - **`/`**: main viewer interface with stream playback and captions
+  - **`/translate`**: viewer interface with translated captions
+  - **`/dev`**: developer view with detailed status information
 
 Not included in this repository:
 
@@ -25,12 +29,12 @@ Not included in this repository:
 
 ### Architecture (high level)
 
-1. A publisher/device pushes a live stream to your streaming server (commonly RTMP ingest).
-2. `relay_service` connects to that RTMP URL, extracts audio via FFmpeg, and streams PCM to your ASR service.
-3. The ASR service returns caption JSON messages; `relay_service` broadcasts them to web clients.
-4. `frontend` plays the live stream (HLS recommended) and overlays the captions received from the relay.
+1. **Publisher** pushes RTMP stream to **nginx** reverse proxy
+2. **nginx** forwards RTMP to **OvenMediaEngine**, which transcodes to **LL-HLS** for browser playback
+3. **relay_service** pulls audio, sends to **ASR WebSocket** and broadcasts the returned captions to web clients via `/subtitles` WebSocket
+4. **frontend** plays LL-HLS stream and displays live captions
 
-Important detail: **browsers cannot play RTMP directly**. Your `RTMP_URL` (relay ingest) and `STREAM_URL` (frontend playback) may point to different protocols/URLs produced by the same streaming stack.
+**Key**: nginx routes all traffic (RTMP ingest, LL-HLS playback, WebSocket, web UI). Relay uses RTMP for audio extraction; browsers use LL-HLS for low-latency playback.
 
 ---
 
@@ -48,112 +52,63 @@ Docker Compose loads service configuration via `.env` files (`env_file:` in `doc
 
 If you change any ports/URLs in `frontend/.env`, re-run `./scripts/set_frontend_config.sh` and rebuild via Docker Compose.
 
-#### Frontend config file (`frontend/config.js`)
-
-The static UI reads runtime settings from `frontend/config.js`:
-
-- `streamUrl`: what the browser plays (HLS `.m3u8` recommended)
-- `relayWsUrl`: where the browser connects for captions (`ws://.../subtitles` or `wss://.../subtitles`)
-
-For Docker Compose, run `scripts/set_frontend_config.sh` to generate `frontend/config.js` and also sync the frontend port/bind settings across `frontend/Dockerfile` and `docker-compose.yml`.
-
 #### Relay service (`relay_service/.env`)
 
 Create `relay_service/.env`:
 
 ```bash
-RTMP_URL=rtmp://localhost/live
-ASR_WS_URL=ws://127.0.0.1:9001/asr
+# Streaming Source
+RTMP_URL=rtmp://.../live/stream1
 
-# Audio settings (must match your ASR expectations)
+# ASR Connection
+ASR_WS_URL=wss://.../asr
+STOP_TIMEOUT_SECONDS=3
+CERT=ssl-config/cert.pem
+CHUNK_MS=100
 SAMPLE_RATE=16000
-CHUNK_MS=500
-
-# Reconnect behavior (caps exponential backoff)
 MAX_BACKOFF_SECONDS=30
+SEND_BUDGET_SECONDS=0.1
 
-# Stream end / idle handling
-STOP_TIMEOUT_SECONDS=10
-
-# Audio encoding (used only when ASR backend requests WebM/Opus)
-ASR_AUDIO_BITRATE=32k
-
-# Where the relay listens (for browser clients)
+# Caption output service
 RELAY_HOST=0.0.0.0
 RELAY_PORT=9000
-
-# Optional: trust material for wss:// ASR endpoints.
-# Can be inline PEM content OR a filesystem path to a PEM file.
-# CERT="-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----"
-# CERT=/path/to/ca.pem
 ```
 
 What these mean:
 
-**`RTMP_URL`**
-- Source for FFmpeg ingest. Must be reachable from the relay host.
-- If this stream never truly disconnects (e.g., RTMP keeps a silent stream open), STOP timeouts depend on whether FFmpeg output bytes actually stop.
-
-**`ASR_WS_URL`**
-- WebSocket endpoint for the ASR backend (`ws://` or `wss://`).
-- The relay expects the ASR server to send a JSON config message first, then accept audio bytes, and eventually reply with JSON results and `ready_to_stop`.
-- If using `wss://` with a private CA, set `CERT`. If the server uses a public CA, `CERT` is not required.
-- A refused connection here will cause reconnect attempts with backoff (see `MAX_BACKOFF_SECONDS`).
-
-**`SAMPLE_RATE`**
-- Used only when the ASR config message indicates PCM input (`useAudioWorklet=true`).
-- Must match what the ASR backend expects for PCM input (s16le at this sample rate).
-
-**`CHUNK_MS`**
-- Used only when the ASR config message indicates PCM input. Controls the read size from FFmpeg and thus the size of each PCM packet.
-- Smaller values reduce latency but increase overhead.
-
-**`MAX_BACKOFF_SECONDS`**
-- Caps exponential backoff for retries after ASR connection failures or FFmpeg errors.
-- Larger values reduce reconnect spam but may delay recovery.
-
-**`STOP_TIMEOUT_SECONDS`**
-- If FFmpeg output yields no bytes for this long, the relay signals end-of-stream and the ASR connection is closed (after `ready_to_stop`).
-- This is also the timeout used by the ASR sender while connected; if no new chunks arrive for this long, the link is closed.
-- Note: if RTMP continues to output silence frames, this timeout will not trigger because bytes are still flowing.
-
-**`ASR_AUDIO_BITRATE`**
-- Only used when the ASR config message indicates WebM/Opus input (`useAudioWorklet=false`). Passed to FFmpeg (`-b:a`).
-- Example frontend does not set an explicit bitrate; it uses the browser MediaRecorder default.
-- Too high wastes bandwidth; too low can degrade transcription quality.
-
-**`CERT`**
-- Optional certificate trust material used only when `ASR_WS_URL` starts with `wss://`.
-- Can be inline PEM or a path to a PEM file. Omit for standard public CA certificates.
+- `RTMP_URL`: Source for FFmpeg ingest. Must be reachable from the relay host.
+- `ASR_WS_URL`: WebSocket endpoint of the ASR service that receives audio and returns transcriptions.
+- `STOP_TIMEOUT_SECONDS`: Maximum idle time (in seconds) before closing the ASR connection when no audio data is received.
+- `CERT`: Path to a PEM certificate file or inline PEM content for SSL/TLS verification when connecting to the ASR service over `wss://`.
+- `CHUNK_MS`: Duration of each audio chunk in milliseconds (used to calculate chunk size for PCM format).
+- `SAMPLE_RATE`: Audio sample rate in Hz for PCM format conversion.
+- `ASR_AUDIO_BITRATE`: Bitrate for Opus audio encoding when using WebM format (e.g., "24k", "32k").
+- `MAX_BACKOFF_SECONDS`: Maximum backoff delay (in seconds) between reconnection attempts after FFmpeg or ASR failures.
+- `SEND_BUDGET_SECONDS`: Time budget (in seconds) for sending audio chunks before yielding control to the event loop (prevents sender from blocking receiver).
+- `RELAY_HOST`: Host address for the relay service to bind to (typically "0.0.0.0" to accept connections from any interface).
+- `RELAY_PORT`: Port number for the relay service to listen on for WebSocket connections from frontend clients.
 
 #### Frontend (`frontend/.env`)
 
 Create `frontend/.env`:
 
 ```bash
-# Where to serve the static UI
+# Streaming source
+STREAM_URL=https://.../live/stream1/llhls.m3u8
+RELAY_WS_URL=wss://.../subtitles
+
+# Frontend
 FRONTEND_HOST=0.0.0.0
-FRONTEND_PORT=8000
-
-# What the browser plays (HLS recommended)
-STREAM_URL=https://127.0.0.1:8888/hls/stream1/index.m3u8
-
-# Where the browser connects for captions
-RELAY_WS_URL=ws://127.0.0.1:9000/subtitles
+FRONTEND_PORT=8088
 ```
 
-Notes:
+What these mean:
 
-- If you have `frontend/.env.example`, you can start from it:
+- `STREAM_URL`: Source for LL-HLS ingest. Must be reachable by the browsers.
+- `RELAY_WS_URL`: Source for subtitles . Must be reachable by the browser.
+- `FRONTEND_HOST` and `FRONTEND_PORT`: Address and host for the frontend to listen on.
 
-```bash
-cp frontend/.env.example frontend/.env
-```
-
-- **`scripts/set_frontend_config.sh`** can be used to generate the same `frontend/config.js` and also update Docker port settings to match `.env` (recommended before running Docker Compose).
-- `STREAM_URL` must be reachable by the browser (not just the relay host).
-- `RELAY_WS_URL` must be reachable by the browser; use `wss://` if you are serving the UI over HTTPS.
-- The UI loads **Hls.js** from a CDN (`https://cdn.jsdelivr.net/...`). If your deployment cannot access external CDNs, you will need to vendor/serve that script yourself.
+Run `scripts/set_frontend_config.sh` to generate `frontend/config.js` and also sync the frontend port/bind settings.
 
 #### Idle/disconnect behavior
 
@@ -167,11 +122,7 @@ cp frontend/.env.example frontend/.env
 
 This runs: **nginx (RTMP+HLS)**, **relay_service**, and **frontend**.
 
-Default endpoints exposed by `nginx` in `docker-compose.yml`:
-
-- RTMP ingest: `rtmp://<host>:1935/live`
-- HLS playback: `https://<host>:8888/hls/<stream_key>/index.m3u8`
-
+Default RTMP ingest endpoint: `rtmp://<host>:1935/live`.
 Publish a test stream to the built-in RTMP server (example using FFmpeg):
 
 ```bash
@@ -196,7 +147,7 @@ This will:
 - update `frontend/Dockerfile` (`EXPOSE` + `http.server` bind/port)
 - update `docker-compose.yml` frontend `ports:` mapping
 
-Note: re-run this script after you change `FRONTEND_HOST` / `FRONTEND_PORT` / `STREAM_URL` / `RELAY_WS_URL`.
+Note: re-run this script after you update `frontend/.env`.
 
 3) Build and run:
 
@@ -230,17 +181,20 @@ The relay broadcasts JSON messages to all connected `/subtitles` clients:
 
 - **Caption message**:
   - `{"type":"caption","text":"...","ts":"<iso8601>","partial":true|false}`
+  - `{"type":"caption_translation","text":"...","ts":"<iso8601>","partial":true|false}`
 - **Status message**:
   - `{"type":"status","state":"starting|running|waiting|error|stopped","detail":"...","ts":"<iso8601>"}`
+- **ASR status message**:
+  - `{"type":"asr_status","state":"connecting|connected|disconnected|error","detail":"...","ts":"<iso8601>"}`
 
-The frontend automatically reconnects to the subtitle WebSocket and periodically displays an idle “waiting for signal” state when no messages arrive.
+The frontend automatically reconnects to the subtitle WebSocket and logs an idle message every 8 seconds when no messages are received from the relay.
 
 ---
 
 ### Troubleshooting
 
 - **Frontend shows “no signal” / video won’t play**:
-  - Ensure `STREAM_URL` is **browser-playable** (HLS `.m3u8` recommended).
+  - Ensure `STREAM_URL` is **browser-playable** (LL-HLS `.m3u8` recommended).
   - Ensure your streaming server sets correct **CORS** headers for the HLS URL.
 - **Relay connects but no captions appear**:
   - Verify `ASR_WS_URL` is reachable and speaks the expected protocol (config JSON -> audio bytes -> JSON results + `ready_to_stop`).
