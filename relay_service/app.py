@@ -7,12 +7,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 
-from .asr_link import asr_link
-from .audio import AudioQueue, FormatController, IngestEpoch
 from .config import RelayConfig
-from .ffmpeg_ingest import ffmpeg_reader
 
 logger = logging.getLogger("relay")
 
@@ -85,6 +82,17 @@ class SubtitleBroadcaster:
         self._last_asr_status = payload
         await self.broadcast(payload)
 
+    async def close_all(self, code: int = 1012) -> None:
+        """Close every connected client socket; used when the session is terminating."""
+        async with self._lock:
+            clients = list(self._clients)
+            self._clients.clear()
+        for ws in clients:
+            try:
+                await ws.close(code=code)
+            except Exception:
+                pass
+
 
 def build_ssl_context(cert: str | None) -> ssl.SSLContext | None:
     """Create an SSL context that trusts the provided CERT env content/path."""
@@ -111,64 +119,60 @@ def build_ssl_context(cert: str | None) -> ssl.SSLContext | None:
 
 
 def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
-    broadcaster = SubtitleBroadcaster()
-    audio_queue = AudioQueue()
-    fmt_controller = FormatController("webm")
-    ingest_epoch = IngestEpoch()
-    stop_event = asyncio.Event()
-    stream_end_event = asyncio.Event()
-    restart_ingest_event = asyncio.Event()
+    # Lazy import to break circular dependency (resource_manage imports from this module).
+    from .resource_manage import (
+        DuplicateKeyError,
+        InvalidKeyError,
+        SessionManager,
+        SessionState,
+        validate_key,
+    )
+
     ssl_context = build_ssl_context(cfg.cert)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Initial ASR state: not connected until audio arrives and link is established.
-        await broadcaster.broadcast_asr_status("disconnected", "initial")
-        app.state.ffmpeg_task = asyncio.create_task(
-            ffmpeg_reader(
-                cfg,
-                audio_queue,
-                fmt_controller,
-                ingest_epoch,
-                stop_event,
-                broadcaster,
-                stream_end_event,
-                restart_ingest_event,
-                debug_mode,
-            )
-        )
-        app.state.asr_task = asyncio.create_task(
-            asr_link(
-                cfg,
-                audio_queue,
-                fmt_controller,
-                ingest_epoch,
-                broadcaster,
-                stop_event,
-                stream_end_event,
-                restart_ingest_event,
-                debug_mode,
-                ssl_context,
-            )
-        )
+        app.state.manager = SessionManager(cfg, ssl_context, debug_mode)
         logger.info("relay startup complete")
         try:
             yield
         finally:
-            stop_event.set()
-            await broadcaster.broadcast_asr_status("disconnected", "relay shutting down")
-            tasks = [app.state.ffmpeg_task, app.state.asr_task]
-            for t in tasks:
-                t.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await app.state.manager.shutdown_all()
             logger.info("relay shutdown complete")
 
     app = FastAPI(title="LiveCaption Relay", lifespan=lifespan)
 
-    @app.websocket("/subtitles")
-    async def subtitles_ws(ws: WebSocket):
+    @app.post("/register")
+    async def register(src: str = Query(..., min_length=1)):
+        try:
+            validate_key(src)
+        except InvalidKeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        try:
+            session = await app.state.manager.register(src)
+        except DuplicateKeyError:
+            raise HTTPException(status_code=409, detail=f"session already registered: {src}")
+        return {"key": session.key, "subtitles_url": f"/subtitles/{session.key}"}
+
+    @app.websocket("/subtitles/{key}")
+    async def subtitles_ws(ws: WebSocket, key: str):
+        # Starlette requires accept() before close() with a custom code.
+        try:
+            validate_key(key)
+        except InvalidKeyError:
+            await ws.accept()
+            await ws.close(code=4000)
+            return
+        session = app.state.manager.get(key)
+        if session is None or session.state in (
+            SessionState.TERMINATING,
+            SessionState.TERMINATED,
+        ):
+            await ws.accept()
+            await ws.close(code=4004)
+            return
         await ws.accept()
-        await broadcaster.register(ws)
+        await session.broadcaster.register(ws)
         try:
             while True:
                 # Keep reading to detect disconnects; ignore content.
@@ -176,7 +180,7 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
-            await broadcaster.unregister(ws)
+            await session.broadcaster.unregister(ws)
 
     @app.get("/healthz")
     async def healthcheck():

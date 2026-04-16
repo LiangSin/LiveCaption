@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("relay")
 
 
-def build_ffmpeg_cmd(cfg: RelayConfig, fmt: str) -> tuple[list[str], int]:
+def build_ffmpeg_cmd(cfg: RelayConfig, fmt: str, rtmp_url: str) -> tuple[list[str], int]:
     """
     Build ffmpeg command and suggested read size.
 
@@ -29,7 +29,7 @@ def build_ffmpeg_cmd(cfg: RelayConfig, fmt: str) -> tuple[list[str], int]:
             "-loglevel",
             "error",
             "-i",
-            cfg.rtmp_url,
+            rtmp_url,
             "-vn",
             "-ac",
             "1",
@@ -51,7 +51,7 @@ def build_ffmpeg_cmd(cfg: RelayConfig, fmt: str) -> tuple[list[str], int]:
         "-loglevel",
         "error",
         "-i",
-        cfg.rtmp_url,
+        rtmp_url,
         "-vn",
         "-ac",
         "1",
@@ -78,6 +78,7 @@ async def ffmpeg_reader(
     stream_end_event: asyncio.Event,
     restart_ingest_event: asyncio.Event,
     debug_mode: bool = False,
+    rtmp_url: str = "",
 ):
     """Continuously pull PCM audio from RTMP using FFmpeg; restart on failure."""
     backoff = 1
@@ -87,14 +88,17 @@ async def ffmpeg_reader(
     stop_timeout = max(1.0, float(cfg.stop_timeout_seconds))
     read_poll_seconds = 1.0
     idle_log_interval = 10.0
-    idle_signaled = False
     while not stop_event.is_set():
         fmt = await fmt_controller.wait_for_format()
         if current_fmt != fmt:
             logger.info("ffmpeg ingest format set to: %s", fmt)
             current_fmt = fmt
         chunk_counter = 0
-        cmd, chunk_bytes = build_ffmpeg_cmd(cfg, fmt)
+        # Per-run idle tracking; reset so each ffmpeg invocation can freshly signal
+        # stream_end_event. Without this, asr_link's reset_to_initial_state can clear
+        # the event while idle_signaled stays True, leaving the watchdog starved.
+        idle_signaled = False
+        cmd, chunk_bytes = build_ffmpeg_cmd(cfg, fmt, rtmp_url)
         logger.info("starting ffmpeg: %s", " ".join(cmd))
         try:
             process = await asyncio.create_subprocess_exec(
