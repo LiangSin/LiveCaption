@@ -341,7 +341,16 @@
 
       let hasManifestParsed = false;
       let hasFragLoaded = false;
+      let isStreamPlayable = false;
       let lastCatchUpAt = 0;
+
+      const markStreamPlayable = (source) => {
+        if (isStreamPlayable) return;
+        isStreamPlayable = true;
+        appendLog(`Stream became playable (${source})`);
+        clearStreamNoSignalTimeout();
+        setVideoStatus("playing");
+      };
 
       const maybeCatchUp = (source) => {
         if (player.seeking) return;
@@ -373,8 +382,7 @@
       hls.on(window.Hls.Events.MANIFEST_PARSED, (event, data) => {
         appendLog(`HLS: Manifest parsed, levels: ${data.levels?.length || 0}`);
         hasManifestParsed = true;
-        clearStreamNoSignalTimeout();
-        setVideoStatus("playing");
+        // Manifest parsed does not guarantee media is actually playable yet.
       });
 
       // hls.on(window.Hls.Events.LEVEL_LOADING, (event, data) => {
@@ -388,12 +396,13 @@
       hls.on(window.Hls.Events.FRAG_LOADED, (event, data) => {
         // appendLog(`HLS: Fragment loaded: ${data.frag?.sn}`);
         hasFragLoaded = true;
-        clearStreamNoSignalTimeout();
-        setVideoStatus("playing");
       });
 
       hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
         maybeCatchUp("frag");
+        if (player.readyState >= 2) {
+          markStreamPlayable("fragment buffered");
+        }
       });
 
       // 直播同步事件 - 確保播放最新內容
@@ -419,6 +428,8 @@
 
       hls.loadSource(url);
       hls.attachMedia(player);
+      player.addEventListener("canplay", () => markStreamPlayable("video canplay"), { once: true });
+      player.addEventListener("playing", () => markStreamPlayable("video playing"), { once: true });
 
       // 對於直播，設置靜音以增加自動播放成功率
       player.muted = true;
