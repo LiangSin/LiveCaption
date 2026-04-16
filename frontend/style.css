@@ -378,15 +378,42 @@ input[type="text"] {
 
 .caption {
   height: 200px;
-  padding: 12px;
-  border-radius: 10px;
-  background: #eef3ff;
-  border: 1px solid #c8d6ff;
+  padding: 8px 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 500;
   overflow-y: auto;
-  white-space: pre-wrap;
+  white-space: normal;
   word-wrap: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.caption-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.caption-original,
+.caption-translation {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Noto Serif TC", "Noto Serif", "Times New Roman", Times, serif;
+}
+
+.caption-original {
+  color: #282800;
+  font-weight: 600;
+}
+
+.caption-translation {
+  color: #66663e;
+  font-weight: 500;
+  font-size: 0.88em;
 }
 
 

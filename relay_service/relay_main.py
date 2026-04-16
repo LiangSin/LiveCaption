@@ -546,7 +546,6 @@ async def asr_link(
 
                 async def receiver():
                     nonlocal ready_to_stop_seen, last_status, last_caption
-                    last_translation = None
                     async for message in ws:
                         try:
                             payload = json.loads(message)
@@ -565,7 +564,7 @@ async def asr_link(
                             logger.info("ASR result: %s", payload)
                             continue
 
-                        if payload.get("type") in {"caption", "status"}:
+                        if payload.get("type") == "status":
                             await broadcaster.broadcast(payload)
                             continue
 
@@ -581,52 +580,69 @@ async def asr_link(
                             )
                             last_status = status
 
-                        lines = payload.get("lines") or []
-                        line_text = ""
-                        line_translation = ""
-                        if isinstance(lines, list):
-                            for line in reversed(lines):
-                                if not isinstance(line, dict):
+                        raw_lines = payload.get("lines") or []
+                        normalized_lines = []
+                        if isinstance(raw_lines, list):
+                            for line in raw_lines:
+                                if isinstance(line, str):
+                                    original = line.strip()
+                                    translation = ""
+                                elif isinstance(line, dict):
+                                    original = (
+                                        line.get("original")
+                                        or line.get("text")
+                                        or line.get("caption")
+                                        or line.get("source")
+                                        or ""
+                                    ).strip()
+                                    translation = (
+                                        line.get("translation")
+                                        or line.get("text_translation")
+                                        or line.get("translated")
+                                        or ""
+                                    ).strip()
+                                else:
                                     continue
-                                candidate = (line.get("text") or "").strip()
-                                if candidate and not line_text:
-                                    line_text = candidate
-                                candidate_tr = (line.get("translation") or line.get("text_translation") or "").strip()
-                                if candidate_tr and not line_translation:
-                                    line_translation = candidate_tr
-                                if line_text and line_translation:
-                                    break
+                                if not original and not translation:
+                                    continue
+                                normalized_lines.append(
+                                    {
+                                        "text": original,
+                                        "translation": translation,
+                                    }
+                                )
+
                         buffer_text = (payload.get("buffer_transcription") or "").strip()
-                        text = " ".join(part for part in (line_text, buffer_text) if part).strip()
-                        if text:
-                            partial = bool(buffer_text)
-                            caption_key = (text, partial)
+                        buffer_translation = (payload.get("buffer_translation") or "").strip()
+                        if buffer_text or buffer_translation:
+                            normalized_lines.append(
+                                {
+                                    "text": buffer_text,
+                                    "translation": buffer_translation,
+                                }
+                            )
+
+                        # Keep only latest 10 items for frontend rendering.
+                        normalized_lines = normalized_lines[-10:]
+                        if normalized_lines:
+                            partial = bool(buffer_text or buffer_translation)
+                            latest = normalized_lines[-1]
+                            caption_key = (
+                                json.dumps(normalized_lines, ensure_ascii=False, sort_keys=True),
+                                partial,
+                            )
                             if caption_key != last_caption:
                                 await broadcaster.broadcast(
                                     {
                                         "type": "caption",
-                                        "text": text,
+                                        "lines": normalized_lines,
+                                        "text": latest.get("text", ""),
+                                        "translation": latest.get("translation", ""),
                                         "partial": partial,
                                         "ts": payload["ts"],
                                     }
                                 )
                                 last_caption = caption_key
-
-                        buffer_tr = (payload.get("buffer_translation") or "").strip()
-                        tr_text = " ".join(part for part in (line_translation, buffer_tr) if part).strip()
-                        if tr_text:
-                            tr_partial = bool(buffer_tr)
-                            tr_key = (tr_text, tr_partial)
-                            if tr_key != last_translation:
-                                await broadcaster.broadcast(
-                                    {
-                                        "type": "caption_translation",
-                                        "text": tr_text,
-                                        "partial": tr_partial,
-                                        "ts": payload["ts"],
-                                    }
-                                )
-                                last_translation = tr_key
 
                 sender_task = asyncio.create_task(sender(first_chunk))
                 receiver_task = asyncio.create_task(receiver())

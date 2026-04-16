@@ -2,8 +2,6 @@
   const qs = (id) => document.getElementById(id);
 
   const appRoot = qs("app");
-  const captionMode = appRoot?.dataset?.captionMode || "original"; // "original" | "translation"
-  const wantTranslation = captionMode === "translation";
 
   const player = qs("player");
   const videoStatus = qs("videoStatus");
@@ -36,12 +34,12 @@
     let idleTimer = null;
     let lastWsMessage = null;
     let liveCatchupTimer = null;
+    let streamRetryTimer = null;
+    let streamNoSignalTimer = null;
+    let activeHls = null;
     // Subtitle rendering state (driven by ASR backend connection state).
     let asrState = "disconnected"; // "connected" | "connecting" | "disconnected" | "error"
-    let lastCaptionText = ""; // last non-empty caption shown
-    let lastCaptionAt = null; // ms epoch when last non-empty caption was shown
-    let captionStaleTimer = null;
-    const CAPTION_STALE_MS = 60 * 1000;
+    let captionItems = [];
 
     function appendLog(message) {
     const ts = new Date().toISOString();
@@ -70,7 +68,59 @@
     if (noSignalMessage) noSignalMessage.style.display = hasSignal ? "none" : "flex";
   }
 
-  function setCaption(text) {
+  function clearStreamRetry() {
+    if (streamRetryTimer) {
+      clearTimeout(streamRetryTimer);
+      streamRetryTimer = null;
+    }
+  }
+
+  function clearStreamNoSignalTimeout() {
+    if (streamNoSignalTimer) {
+      clearTimeout(streamNoSignalTimer);
+      streamNoSignalTimer = null;
+    }
+  }
+
+  function destroyActiveHls() {
+    if (!activeHls) return;
+    try {
+      activeHls.destroy();
+    } catch {
+      // ignore cleanup errors
+    }
+    activeHls = null;
+  }
+
+  function scheduleStreamReload(reason, delayMs = 10000) {
+    if (streamRetryTimer) {
+      appendLog(`Reload already scheduled; skip duplicate (${reason})`);
+      return;
+    }
+    appendLog(`Scheduling stream reload in ${delayMs}ms (${reason})`);
+    streamRetryTimer = setTimeout(() => {
+      streamRetryTimer = null;
+      loadStream();
+    }, delayMs);
+  }
+
+  function normalizeCaptionLines(lines) {
+    if (!Array.isArray(lines)) return [];
+    return lines.map((line) => {
+      if (typeof line === "string") {
+        return { original: line, translation: "" };
+      }
+      if (!line || typeof line !== "object") {
+        return { original: "", translation: "" };
+      }
+      return {
+        original: String(line.text ?? ""),
+        translation: String(line.translation ?? ""),
+      };
+    });
+  }
+
+  function setCaption(lines) {
     if (!captionEl) return;
     // Never show captions while ASR is not connected.
     if (asrState !== "connected") return;
@@ -78,15 +128,8 @@
     // 檢查是否已經滾動到底部（或接近底部，允許 5px 的誤差）
     const isAtBottom = captionEl.scrollHeight - captionEl.scrollTop - captionEl.clientHeight <= 5;
 
-    const normalized = (text ?? "").toString();
-    captionEl.textContent = normalized;
-
-    // Track freshness only for non-empty captions.
-    if (normalized.trim().length > 0) {
-      lastCaptionText = normalized;
-      lastCaptionAt = Date.now();
-      scheduleCaptionStaleCheck();
-    }
+    captionItems = normalizeCaptionLines(lines);
+    renderCaptionState();
 
     // 如果之前在底部，則自動滾動到新的底部
     if (isAtBottom) {
@@ -102,39 +145,25 @@
       return;
     }
 
-    // Connected: show last caption if any; otherwise show nothing.
-    captionEl.textContent = lastCaptionText || "";
-  }
+    captionEl.textContent = "";
+    const fragment = document.createDocumentFragment();
+    captionItems.forEach((item) => {
+      const itemEl = document.createElement("div");
+      itemEl.className = "caption-item";
 
-  function scheduleCaptionStaleCheck() {
-    if (captionStaleTimer) {
-      clearTimeout(captionStaleTimer);
-      captionStaleTimer = null;
-    }
-    if (asrState !== "connected") return;
-    if (!lastCaptionAt) return;
+      const originalEl = document.createElement("div");
+      originalEl.className = "caption-original";
+      originalEl.textContent = item.original || "";
 
-    const elapsed = Date.now() - lastCaptionAt;
-    const remaining = Math.max(0, CAPTION_STALE_MS - elapsed);
-    captionStaleTimer = setTimeout(() => {
-      if (asrState !== "connected") {
-        renderCaptionState();
-        return;
-      }
-      if (!lastCaptionAt) return;
-      if (Date.now() - lastCaptionAt >= CAPTION_STALE_MS) {
-        // Stale: clear caption (connected but no valid subtitle recently).
-        lastCaptionText = "";
-        lastCaptionAt = null;
-        // Only clear UI if nothing is scheduled to appear imminently.
-        if (!pendingCaptions || pendingCaptions.length === 0) {
-          captionEl.textContent = "";
-        }
-      } else {
-        // Drift: reschedule with updated remaining time.
-        scheduleCaptionStaleCheck();
-      }
-    }, remaining);
+      const translationEl = document.createElement("div");
+      translationEl.className = "caption-translation";
+      translationEl.textContent = item.translation || "";
+
+      itemEl.appendChild(originalEl);
+      itemEl.appendChild(translationEl);
+      fragment.appendChild(itemEl);
+    });
+    captionEl.appendChild(fragment);
   }
 
   function scheduleIdleNotice() {
@@ -189,17 +218,7 @@
       setSubtitleStatus("disconnected");
       // Without relay connection, treat ASR as disconnected from the UI's perspective.
       asrState = "disconnected";
-      lastCaptionText = "";
-      lastCaptionAt = null;
-      if (captionStaleTimer) {
-        clearTimeout(captionStaleTimer);
-        captionStaleTimer = null;
-      }
-      pendingCaptions = [];
-      if (captionTimer) {
-        clearTimeout(captionTimer);
-        captionTimer = null;
-      }
+      captionItems = [];
       renderCaptionState();
       scheduleIdleNotice();
       const delay = Math.min(wsBackoff, 15000);
@@ -233,66 +252,25 @@
         setSubtitleStatus(`asr:${next}`);
         if (asrState !== "connected") {
           // Reset caption state when ASR is not connected.
-          lastCaptionText = "";
-          lastCaptionAt = null;
-          if (captionStaleTimer) {
-            clearTimeout(captionStaleTimer);
-            captionStaleTimer = null;
-          }
-          pendingCaptions = [];
-          if (captionTimer) {
-            clearTimeout(captionTimer);
-            captionTimer = null;
-          }
-        } else {
-          // Connected: show last caption (or empty) and start stale timer if needed.
-          scheduleCaptionStaleCheck();
+          captionItems = [];
         }
         renderCaptionState();
         return;
       }
 
-      // Caption routing: main page shows transcription; /translate shows translation.
-      if (!wantTranslation && payload.type === "caption") {
-          const text = payload.text || "";
-          const isPartial = payload.partial || false;
-          if (text.toString().trim().length === 0) {
-            // Connected but no valid subtitle: show nothing and keep last caption (until stale timeout).
-            setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
-            return;
-          }
-          appendLog(`Caption${isPartial ? " (partial)" : ""}: ${text}`);
-          setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
-          setCaption(text);
-          return;
-      }
-
-      if (wantTranslation) {
-        // Preferred: relay emits caption_translation messages.
-        if (payload.type === "caption_translation") {
-          const text = payload.text || "";
-          const isPartial = payload.partial || false;
-          if (text.toString().trim().length === 0) {
-            setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
-            return;
-          }
-          appendLog(`Translation${isPartial ? " (partial)" : ""}: ${text}`);
-          setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
-          scheduleCaption(text, isPartial);
+      if (payload.type === "caption") {
+        const isPartial = payload.partial || false;
+        const lines = Array.isArray(payload.lines) ? payload.lines : [];
+        setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+        if (lines.length === 0) {
+          appendLog("Caption dropped: missing lines[] payload");
           return;
         }
-
-        // Fallback: if upstream ever embeds translation in caption payload.
-        if (payload.type === "caption") {
-          const translated = (payload.translation || payload.text_translation || "").toString();
-          if (translated.trim().length > 0) {
-            const isPartial = payload.partial || false;
-            appendLog(`Translation${isPartial ? " (partial)" : ""}: ${translated}`);
-            setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
-            scheduleCaption(translated, isPartial);
-            return;
-          }
-        }
+        appendLog(
+          `Caption${isPartial ? " (partial)" : ""}: received ${lines.length} lines`
+        );
+        setCaption(lines);
+        return;
       }
 
       if (payload.type === "status") {
@@ -308,6 +286,9 @@
 
   function loadStream() {
     const url = streamUrl;
+    clearStreamRetry();
+    clearStreamNoSignalTimeout();
+    destroyActiveHls();
     appendLog(`Loading stream: ${url}`);
     setVideoStatus("loading...");
 
@@ -326,8 +307,7 @@
         appendLog(`HLS URL fetch error: ${error.message}, type: ${error.name}`);
         console.error('Fetch error details:', error);
         setVideoStatus("no signal");
-        // 增加重試間隔到 10 秒，避免瘋狂刷新
-        setTimeout(loadStream, 10000);
+        scheduleStreamReload("HEAD fetch failed");
       });
   }
 
@@ -357,6 +337,7 @@
         enableWorker: true,
         debug: true,
       });
+      activeHls = hls;
 
       let hasManifestParsed = false;
       let hasFragLoaded = false;
@@ -378,10 +359,10 @@
         appendLog(`HLS error: ${data?.details || "unknown"}, type: ${data?.type}, fatal: ${data?.fatal}`);
         console.error("HLS Error:", data); // 在控制台顯示詳細錯誤
         if (data?.fatal) {
-          hls.destroy();
+          clearStreamNoSignalTimeout();
+          destroyActiveHls();
           setVideoStatus("error");
-          // 增加重試間隔到 10 秒，避免瘋狂刷新
-          setTimeout(loadStream, 10000);
+          scheduleStreamReload(`fatal HLS error: ${data?.details || "unknown"}`);
         }
       });
 
@@ -392,6 +373,7 @@
       hls.on(window.Hls.Events.MANIFEST_PARSED, (event, data) => {
         appendLog(`HLS: Manifest parsed, levels: ${data.levels?.length || 0}`);
         hasManifestParsed = true;
+        clearStreamNoSignalTimeout();
         setVideoStatus("playing");
       });
 
@@ -406,6 +388,7 @@
       hls.on(window.Hls.Events.FRAG_LOADED, (event, data) => {
         // appendLog(`HLS: Fragment loaded: ${data.frag?.sn}`);
         hasFragLoaded = true;
+        clearStreamNoSignalTimeout();
         setVideoStatus("playing");
       });
 
@@ -424,14 +407,14 @@
       });
 
       // 如果超過 30 秒還沒有載入成功，認為沒有訊號
-      setTimeout(() => {
+      streamNoSignalTimer = setTimeout(() => {
         if (!hasManifestParsed && !hasFragLoaded) {
           appendLog("No stream signal detected after timeout (30s)");
           setVideoStatus("no signal");
-          hls.destroy();
-          // 繼續定期檢查
-          setTimeout(loadStream, 10000);
+          destroyActiveHls();
+          scheduleStreamReload("no signal timeout");
         }
+        streamNoSignalTimer = null;
       }, 30000);
 
       hls.loadSource(url);
@@ -465,8 +448,7 @@
     player.onerror = () => {
       appendLog("Video error while loading source");
       setVideoStatus("no signal");
-      // attempt reload with backoff - 增加到 10 秒避免瘋狂刷新
-      setTimeout(loadStream, 10000);
+      scheduleStreamReload("native player error");
     };
 
     if (isHlsUrl) {
