@@ -144,10 +144,88 @@
     root.appendChild(main);
   }
 
+  function showLogin(root, { onSubmit } = {}) {
+    // Injected when the URL has no ?src=<key>; a minimal form for the user to
+    // type a streaming key. Pattern mirrors the backend's KEY_RE.
+    const existing = document.getElementById("loginView");
+    if (existing) existing.remove();
+
+    const view = document.createElement("div");
+    view.id = "loginView";
+    view.className = "login-view";
+
+    const form = document.createElement("form");
+    form.className = "login-view__form";
+    form.autocomplete = "off";
+    form.noValidate = true;
+
+    const title = document.createElement("h1");
+    title.className = "login-view__title";
+    title.textContent = "輸入 streaming key";
+    form.appendChild(title);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.name = "src";
+    input.className = "login-view__input";
+    input.placeholder = "e.g. demo";
+    input.pattern = "[A-Za-z0-9_-]{1,64}";
+    input.maxLength = 64;
+    input.required = true;
+    input.autocapitalize = "off";
+    input.spellcheck = false;
+    form.appendChild(input);
+
+    const button = document.createElement("button");
+    button.type = "submit";
+    button.className = "login-view__button";
+    button.textContent = "觀看";
+    form.appendChild(button);
+
+    const error = document.createElement("p");
+    error.className = "login-view__error";
+    error.hidden = true;
+    form.appendChild(error);
+
+    form.addEventListener("submit", (evt) => {
+      evt.preventDefault();
+      const key = (input.value || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) {
+        error.textContent = "Key 格式錯誤：僅允許 A-Z / a-z / 0-9 / _ / -，長度 1-64";
+        error.hidden = false;
+        return;
+      }
+      error.hidden = true;
+      if (typeof onSubmit === "function") onSubmit(key);
+    });
+
+    view.appendChild(form);
+    (root || document.body).appendChild(view);
+    // Hide the auto-mounted main panels so the login view owns the viewport.
+    const appNode = document.getElementById("app");
+    if (appNode) appNode.style.display = "none";
+
+    setTimeout(() => input.focus(), 0);
+    return view;
+  }
+
+  function showFatal(root, message) {
+    const existing = document.getElementById("fatalBanner");
+    if (existing) existing.remove();
+    const banner = document.createElement("div");
+    banner.id = "fatalBanner";
+    banner.className = "fatal";
+    banner.textContent = message;
+    (root || document.body).appendChild(banner);
+    return banner;
+  }
+
   window.LiveCaptionUI = {
     mount,
     createVideoPanel,
     createSubtitlePanel,
+    showLogin,
+    showFatal,
   };
 
   mount();

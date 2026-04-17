@@ -449,3 +449,83 @@ input[type="text"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* Shown when the URL has no ?src=<key>; owns the viewport while visible. */
+.login-view {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+  z-index: 100;
+}
+
+.login-view__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 360px;
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 20, 40, 0.08);
+}
+
+.login-view__title {
+  margin: 0 0 4px;
+  font-size: 1.25rem;
+  color: var(--text);
+}
+
+.login-view__input {
+  padding: 10px 12px;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+
+.login-view__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 98, 254, 0.2);
+}
+
+.login-view__button {
+  padding: 10px 12px;
+  font-size: 1rem;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.login-view__button:hover {
+  filter: brightness(1.05);
+}
+
+.login-view__error {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--error);
+}
+
+.fatal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--error);
+  font-size: 1rem;
+  text-align: center;
+  z-index: 200;
+}

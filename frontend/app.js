@@ -10,22 +10,80 @@
   const logEl = qs("log");
   const noSignalMessage = qs("noSignalMessage");
 
+  // Mirrors relay_service/resource_manage.py:KEY_RE.
+  const KEY_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+  function getSrcFromURL() {
+    const raw = new URLSearchParams(window.location.search).get("src");
+    return raw && KEY_RE.test(raw) ? raw : null;
+  }
+
+  function deriveRegisterUrl(relayWsUrl) {
+    const u = new URL(relayWsUrl);
+    u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+    u.pathname = "/register";
+    u.search = "";
+    u.hash = "";
+    return u.toString().replace(/\/$/, "");
+  }
+
+  async function registerKey(registerUrl, key) {
+    const res = await fetch(`${registerUrl}?src=${encodeURIComponent(key)}`, {
+      method: "POST",
+    });
+    // 200: session created; 409: already exists (another viewer). Both mean
+    // "OK to subscribe"; anything else is fatal for this page load.
+    if (res.status === 200 || res.status === 409) return res.status;
+    throw new Error(`HTTP ${res.status}`);
+  }
+
   // 等待配置載入
   function waitForConfig() {
-    if (window.FRONTEND_CONFIG) {
-      const cfg = window.FRONTEND_CONFIG;
-      const defaultHost = cfg.host || window.location.hostname || "localhost";
-      const streamUrl = cfg.streamUrl || `rtmp://${defaultHost}/live`;
-      const relayWsUrl = cfg.relayWsUrl || `ws://${defaultHost}:9000/subtitles`;
-
-      console.log("[frontend] Config loaded:", cfg);
-      console.log("[frontend] Stream URL:", streamUrl);
-      console.log("[frontend] Relay WS URL:", relayWsUrl);
-      startApp(streamUrl, relayWsUrl);
-    } else {
+    if (!window.FRONTEND_CONFIG) {
       console.log("[frontend] Waiting for config...");
       setTimeout(waitForConfig, 100);
+      return;
     }
+    const cfg = window.FRONTEND_CONFIG;
+    const defaultHost = cfg.host || window.location.hostname || "localhost";
+    const streamUrlBase = (cfg.streamUrl || `rtmp://${defaultHost}/live`).replace(/\/+$/, "");
+    const relayWsUrlBase = (cfg.relayWsUrl || `ws://${defaultHost}:9000/subtitles`).replace(/\/+$/, "");
+    console.log("[frontend] Config loaded:", cfg);
+    console.log("[frontend] Stream URL base:", streamUrlBase);
+    console.log("[frontend] Relay WS URL base:", relayWsUrlBase);
+
+    const key = getSrcFromURL();
+    if (!key) {
+      console.log("[frontend] No ?src= in URL; showing login view.");
+      window.LiveCaptionUI.showLogin(document.body, {
+        onSubmit: (k) => {
+          // Navigate with the chosen key; the page reloads into the src branch.
+          window.location.search = "?src=" + encodeURIComponent(k);
+        },
+      });
+      return;
+    }
+
+    const registerUrl = deriveRegisterUrl(relayWsUrlBase);
+    const streamUrl = `${streamUrlBase}/${key}/llhls.m3u8`;
+    const relayWsUrl = `${relayWsUrlBase}/${key}`;
+    console.log("[frontend] Source key:", key);
+    console.log("[frontend] Register URL:", registerUrl);
+    console.log("[frontend] Final stream URL:", streamUrl);
+    console.log("[frontend] Final relay WS URL:", relayWsUrl);
+
+    registerKey(registerUrl, key)
+      .then((status) => {
+        console.log(`[frontend] /register responded ${status}; starting app.`);
+        startApp(streamUrl, relayWsUrl);
+      })
+      .catch((err) => {
+        console.error("[frontend] register failed:", err);
+        window.LiveCaptionUI.showFatal(
+          document.body,
+          `無法註冊 session (src=${key}): ${err.message}`
+        );
+      });
   }
 
   function startApp(streamUrl, relayWsUrl) {
