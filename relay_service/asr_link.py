@@ -278,8 +278,8 @@ async def asr_link(
                                 }
                             )
 
-                        # Keep only latest 10 items for frontend rendering.
-                        normalized_lines = normalized_lines[-10:]
+                        # Keep only latest 30 items for frontend rendering.
+                        normalized_lines = normalized_lines[-30:]
                         if normalized_lines:
                             partial = bool(buffer_text or buffer_translation)
                             latest = normalized_lines[-1]

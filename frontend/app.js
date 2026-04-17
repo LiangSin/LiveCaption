@@ -199,7 +199,7 @@
     if (!captionEl) return;
 
     if (asrState !== "connected") {
-      captionEl.textContent = "No signal";
+      captionEl.textContent = "";
       return;
     }
 

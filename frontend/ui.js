@@ -37,7 +37,7 @@
     const noSignal = document.createElement("div");
     noSignal.id = "noSignalMessage";
     noSignal.className = "no-signal-message";
-    noSignal.textContent = "No signal";
+    noSignal.textContent = "Streaming has not started";
     panel.appendChild(noSignal);
 
     return panel;
@@ -116,7 +116,7 @@
     if (layoutMode === "simple" && subtitleOverlay) {
       // Overlay mode: video and subtitle in one container
       const layout = document.createElement("section");
-      layout.className = "layout layout--simple";
+      layout.className = "layout";
       const videoPanel = createVideoPanel({ showStatus, panel: usePanel, overlay: true });
       videoPanel.appendChild(createSubtitlePanel({ overlay: true }));
       layout.appendChild(videoPanel);
