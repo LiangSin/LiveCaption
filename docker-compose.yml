@@ -1,5 +1,6 @@
 services:
   ome:
+    container_name: ome
     image: airensoft/ovenmediaengine:latest
     environment:
       OME_HOST_IP: 140.112.91.219
@@ -9,6 +10,7 @@ services:
     restart: unless-stopped
 
   nginx:
+    container_name: nginx
     image: tiangolo/nginx-rtmp:latest
     ports:
       - "1935:1935"      # RTMP
@@ -23,6 +25,7 @@ services:
     restart: unless-stopped
 
   relay_service:
+    container_name: relay_service
     build:
       context: .
       dockerfile: relay_service/Dockerfile
@@ -33,6 +36,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    container_name: frontend
     build:
       context: .
       dockerfile: frontend/Dockerfile

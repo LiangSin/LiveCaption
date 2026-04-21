@@ -72,21 +72,10 @@
     console.log("[frontend] Final stream URL:", streamUrl);
     console.log("[frontend] Final relay WS URL:", relayWsUrl);
 
-    registerKey(registerUrl, key)
-      .then((status) => {
-        console.log(`[frontend] /register responded ${status}; starting app.`);
-        startApp(streamUrl, relayWsUrl);
-      })
-      .catch((err) => {
-        console.error("[frontend] register failed:", err);
-        window.LiveCaptionUI.showFatal(
-          document.body,
-          `無法註冊 session (src=${key}): ${err.message}`
-        );
-      });
+    startApp(streamUrl, relayWsUrl, registerUrl, key);
   }
 
-  function startApp(streamUrl, relayWsUrl) {
+  function startApp(streamUrl, relayWsUrl, registerUrl, key) {
     let ws = null;
     let wsBackoff = 1000;
     let idleTimer = null;
@@ -95,6 +84,8 @@
     let streamRetryTimer = null;
     let streamNoSignalTimer = null;
     let activeHls = null;
+    let registerInFlight = false;
+    let registerDone = false;
     // Subtitle rendering state (driven by ASR backend connection state).
     let asrState = "disconnected"; // "connected" | "connecting" | "disconnected" | "error"
     let captionItems = [];
@@ -160,6 +151,17 @@
       streamRetryTimer = null;
       loadStream();
     }, delayMs);
+  }
+
+  function handleStreamLost(reason) {
+    appendLog(`Stream lost: ${reason}; resetting registration/subtitles`);
+    registerDone = false;
+    registerInFlight = false;
+    stopWs();
+    setSubtitleStatus("waiting stream signal...");
+    asrState = "disconnected";
+    captionItems = [];
+    renderCaptionState();
   }
 
   function normalizeCaptionLines(lines) {
@@ -249,6 +251,11 @@
   }
 
   function connectWs() {
+    if (!registerDone) {
+      appendLog("Skip subtitles WS connect before register completes");
+      setSubtitleStatus("waiting register...");
+      return;
+    }
     stopWs();
     const url = relayWsUrl;
     appendLog(`Connecting subtitles WS: ${url}`);
@@ -342,6 +349,29 @@
     };
   }
 
+  async function ensureRegistered(source) {
+    if (registerDone || registerInFlight) return;
+    registerInFlight = true;
+    appendLog(`Registering relay session after stream playable (${source})`);
+    setSubtitleStatus("registering...");
+    try {
+      const status = await registerKey(registerUrl, key);
+      registerDone = true;
+      appendLog(`register success: HTTP ${status}`);
+      setSubtitleStatus("registered");
+      connectWs();
+    } catch (err) {
+      appendLog(`register failed (${source}): ${err?.message || err}`);
+      setSubtitleStatus("register failed; waiting stream retry");
+    } finally {
+      registerInFlight = false;
+    }
+  }
+
+  function onStreamPlayable(source) {
+    ensureRegistered(source);
+  }
+
   function loadStream() {
     const url = streamUrl;
     clearStreamRetry();
@@ -408,6 +438,7 @@
         appendLog(`Stream became playable (${source})`);
         clearStreamNoSignalTimeout();
         setVideoStatus("playing");
+        onStreamPlayable(source);
       };
 
       const maybeCatchUp = (source) => {
@@ -426,6 +457,7 @@
         appendLog(`HLS error: ${data?.details || "unknown"}, type: ${data?.type}, fatal: ${data?.fatal}`);
         console.error("HLS Error:", data); // 在控制台顯示詳細錯誤
         if (data?.fatal) {
+          handleStreamLost(`fatal HLS error: ${data?.details || "unknown"}`);
           clearStreamNoSignalTimeout();
           destroyActiveHls();
           setVideoStatus("error");
@@ -476,6 +508,7 @@
       // 如果超過 30 秒還沒有載入成功，認為沒有訊號
       streamNoSignalTimer = setTimeout(() => {
         if (!hasManifestParsed && !hasFragLoaded) {
+          handleStreamLost("no signal timeout");
           appendLog("No stream signal detected after timeout (30s)");
           setVideoStatus("no signal");
           destroyActiveHls();
@@ -513,8 +546,12 @@
       clearInterval(liveCatchupTimer);
       liveCatchupTimer = null;
     }
-    player.onloadeddata = () => setVideoStatus("playing");
+    player.onloadeddata = () => {
+      setVideoStatus("playing");
+      onStreamPlayable("native loadeddata");
+    };
     player.onerror = () => {
+      handleStreamLost("native player error");
       appendLog("Video error while loading source");
       setVideoStatus("no signal");
       scheduleStreamReload("native player error");
@@ -549,11 +586,8 @@
     // Auto start; reconnections are automatic inside loaders/handlers.
     loadStream();
 
-    // Delay initial relay_service WebSocket connection after page load/refresh.
-    // (Reconnections from ws.onclose keep using their own backoff timing.)
-    const initialWsConnectDelayMs = 2000;
-    appendLog(`Delaying subtitles WS connect for ${initialWsConnectDelayMs}ms...`);
-    setTimeout(() => connectWs(), initialWsConnectDelayMs);
+    appendLog("Waiting for playable stream signal before register/subtitles connect");
+    setSubtitleStatus("waiting stream signal...");
   }
 
   // 開始等待配置載入
