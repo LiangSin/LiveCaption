@@ -2,11 +2,9 @@ services:
   ome:
     container_name: ome
     image: airensoft/ovenmediaengine:latest
-    init: true
+    # init: true
     environment:
       OME_HOST_IP: 140.112.91.219
-    depends_on:
-      - nginx
     volumes:
       - ./ome-server/Server.xml:/opt/ovenmediaengine/bin/origin_conf/Server.xml
       - ./ssl-config/:/opt/ovenmediaengine/bin/ssl-config/
@@ -20,14 +18,22 @@ services:
     volumes:
       - ./ssl-config:/etc/nginx/ssl:ro
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - ome
+      - relay_service
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --no-check-certificate https://127.0.0.1:8088/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   relay_service:
     container_name: relay_service
     build:
       context: .
       dockerfile: relay_service/Dockerfile
-    depends_on:
-      - nginx
     env_file:
       - relay_service/.env
 
@@ -38,8 +44,6 @@ services:
       dockerfile: frontend/Dockerfile
     volumes:
       - ./ssl-config:/ssl-config:ro
-    depends_on:
-      - nginx
     env_file:
       - frontend/.env
 
