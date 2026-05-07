@@ -9,6 +9,7 @@
   const captionEl = qs("caption");
   const logEl = qs("log");
   const noSignalMessage = qs("noSignalMessage");
+  let sessionExpired = false;
 
   // Mirrors relay_service/resource_manage.py:KEY_RE.
   const KEY_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -30,11 +31,29 @@
   async function registerKey(registerUrl, key) {
     const res = await fetch(`${registerUrl}?src=${encodeURIComponent(key)}`, {
       method: "POST",
+      credentials: "same-origin",
     });
     // 200: session created; 409: already exists (another viewer). Both mean
     // "OK to subscribe"; anything else is fatal for this page load.
     if (res.status === 200 || res.status === 409) return res.status;
+    if (res.status === 401) {
+      throw new Error("SESSION_EXPIRED");
+    }
     throw new Error(`HTTP ${res.status}`);
+  }
+
+  function showSessionExpired() {
+    if (sessionExpired) return;
+    sessionExpired = true;
+    if (window.LiveCaptionUI && typeof window.LiveCaptionUI.showSessionExpired === "function") {
+      window.LiveCaptionUI.showSessionExpired(document.body);
+    } else {
+      window.location.href = "/login";
+    }
+  }
+
+  function isSessionExpiredError(err) {
+    return err && String(err.message || err) === "SESSION_EXPIRED";
   }
 
   // 等待配置載入
@@ -54,13 +73,8 @@
 
     const key = getSrcFromURL();
     if (!key) {
-      console.log("[frontend] No ?src= in URL; showing login view.");
-      window.LiveCaptionUI.showLogin(document.body, {
-        onSubmit: (k) => {
-          // Navigate with the chosen key; the page reloads into the src branch.
-          window.location.search = "?src=" + encodeURIComponent(k);
-        },
-      });
+      console.log("[frontend] No ?src= in URL; redirecting to /login.");
+      window.location.replace("/login");
       return;
     }
 
@@ -142,6 +156,7 @@
   }
 
   function scheduleStreamReload(reason, delayMs = 10000) {
+    if (sessionExpired) return;
     if (streamRetryTimer) {
       appendLog(`Reload already scheduled; skip duplicate (${reason})`);
       return;
@@ -251,6 +266,7 @@
   }
 
   function connectWs() {
+    if (sessionExpired) return;
     if (!registerDone) {
       appendLog("Skip subtitles WS connect before register completes");
       setSubtitleStatus("waiting register...");
@@ -263,6 +279,7 @@
     lastWsMessage = null;
     scheduleIdleNotice();
 
+    let opened = false;
     try {
       ws = new WebSocket(url);
     } catch (err) {
@@ -272,6 +289,7 @@
     }
 
     ws.onopen = () => {
+      opened = true;
       wsBackoff = 1000;
       appendLog("Subtitle WS connected");
       setSubtitleStatus("connected");
@@ -280,6 +298,11 @@
 
     ws.onclose = (evt) => {
       appendLog(`Subtitle WS closed (code=${evt.code}, reason=${evt.reason || "none"})`);
+      if (!opened && evt.code === 1006) {
+        appendLog("Subtitle WS auth failed or session expired");
+        showSessionExpired();
+        return;
+      }
       setSubtitleStatus("disconnected");
       // Without relay connection, treat ASR as disconnected from the UI's perspective.
       asrState = "disconnected";
@@ -350,6 +373,7 @@
   }
 
   async function ensureRegistered(source) {
+    if (sessionExpired) return;
     if (registerDone || registerInFlight) return;
     registerInFlight = true;
     appendLog(`Registering relay session after stream playable (${source})`);
@@ -361,6 +385,11 @@
       setSubtitleStatus("registered");
       connectWs();
     } catch (err) {
+      if (isSessionExpiredError(err)) {
+        appendLog("register failed: session expired");
+        showSessionExpired();
+        return;
+      }
       appendLog(`register failed (${source}): ${err?.message || err}`);
       setSubtitleStatus("register failed; waiting stream retry");
     } finally {
@@ -373,6 +402,7 @@
   }
 
   function loadStream() {
+    if (sessionExpired) return;
     const url = streamUrl;
     clearStreamRetry();
     clearStreamNoSignalTimeout();
@@ -384,14 +414,25 @@
     fetch(url, {
       method: 'HEAD',
       mode: 'cors',  // 明確指定 CORS 模式
-      credentials: 'omit'  // 不發送憑證
+      credentials: 'same-origin'
     })
       .then(response => {
+        if (response.status === 401) {
+          throw new Error("SESSION_EXPIRED");
+        }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
         appendLog(`HLS URL accessible: ${response.status}, headers: ${response.headers.get('access-control-allow-origin')}`);
         // 只有在測試成功時才載入 HLS
         loadHlsStream(url);
       })
       .catch(error => {
+        if (isSessionExpiredError(error)) {
+          appendLog("HLS auth failed: session expired");
+          showSessionExpired();
+          return;
+        }
         appendLog(`HLS URL fetch error: ${error.message}, type: ${error.name}`);
         console.error('Fetch error details:', error);
         setVideoStatus("no signal");
@@ -424,6 +465,9 @@
         startLevel: -1,
         enableWorker: true,
         debug: true,
+        xhrSetup: (xhr) => {
+          xhr.withCredentials = true;
+        },
       });
       activeHls = hls;
 
@@ -456,6 +500,11 @@
       hls.on(window.Hls.Events.ERROR, (_, data) => {
         appendLog(`HLS error: ${data?.details || "unknown"}, type: ${data?.type}, fatal: ${data?.fatal}`);
         console.error("HLS Error:", data); // 在控制台顯示詳細錯誤
+        const status = data?.response?.code || data?.response?.status;
+        if (status === 401) {
+          showSessionExpired();
+          return;
+        }
         if (data?.fatal) {
           handleStreamLost(`fatal HLS error: ${data?.details || "unknown"}`);
           clearStreamNoSignalTimeout();

@@ -220,12 +220,48 @@
     return banner;
   }
 
+  function showSessionExpired(root) {
+    const existing = document.getElementById("sessionExpiredView");
+    if (existing) existing.remove();
+
+    const view = document.createElement("div");
+    view.id = "sessionExpiredView";
+    view.className = "session-expired";
+
+    const panel = document.createElement("div");
+    panel.className = "session-expired__panel";
+
+    const title = document.createElement("h1");
+    title.className = "session-expired__title";
+    title.textContent = "Session expired";
+    panel.appendChild(title);
+
+    const message = document.createElement("p");
+    message.className = "session-expired__message";
+    message.textContent = "Please log in again to continue watching.";
+    panel.appendChild(message);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "session-expired__button";
+    button.textContent = "Go to login";
+    button.addEventListener("click", () => {
+      window.location.href = "/login";
+    });
+    panel.appendChild(button);
+
+    view.appendChild(panel);
+    (root || document.body).appendChild(view);
+    return view;
+  }
+
   window.LiveCaptionUI = {
     mount,
     createVideoPanel,
     createSubtitlePanel,
     showLogin,
     showFatal,
+    showSessionExpired,
   };
 
   mount();

@@ -7,3 +7,6 @@ ssl-config/
 
 # Cache files
 __pycache__/
+
+# Authentication keys
+auth_keys.json

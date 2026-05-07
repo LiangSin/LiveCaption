@@ -602,6 +602,11 @@ input[type="text"] {
   outline: none;
 }
 
+.login-view__label {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .login-view__input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 98, 254, 0.2);
@@ -632,4 +637,39 @@ input[type="text"] {
   font-size: 1rem;
   text-align: center;
   z-index: 200;
+}
+
+.session-expired {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(246, 247, 251, 0.96);
+}
+
+.session-expired__panel {
+  width: 100%;
+  max-width: 360px;
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(15, 20, 40, 0.08);
+}
+
+.session-expired__title {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+}
+
+.session-expired__message {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.session-expired__button {
+  width: 100%;
 }

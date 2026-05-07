@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LiveCaption Login</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="login-view login-view--page">
+    <form id="loginForm" class="login-view__form" autocomplete="off">
+      <h1 class="login-view__title">LiveCaption Login</h1>
+      <label class="login-view__label" for="loginKey">Key</label>
+      <select id="loginKey" class="login-view__input" name="key" required></select>
+      <label class="login-view__label" for="loginPasskey">Passkey</label>
+      <input id="loginPasskey" class="login-view__input" type="password" name="passkey" inputmode="text" autocomplete="current-password" required />
+      <button class="login-view__button" type="submit">Login</button>
+      <p id="loginError" class="login-view__error" hidden></p>
+    </form>
+  </main>
+  <script src="./login.js" defer></script>
+</body>
+</html>
