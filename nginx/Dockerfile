@@ -8,6 +8,6 @@ RUN apt-get update \
         wget \
     && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 1935 8088
+EXPOSE 1935 443
 
 CMD ["nginx", "-g", "daemon off;"]

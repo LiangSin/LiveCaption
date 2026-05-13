@@ -16,9 +16,9 @@ services:
       dockerfile: nginx/Dockerfile
     ports:
       - "1935:1935"      # RTMP
-      - "8088:8088"      # Frontend
+      - "443:443"        # Frontend (HTTPS)
     volumes:
-      - ./ssl-config:/etc/nginx/ssl:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./nginx/allowed_networks.conf:/etc/nginx/allowed_networks.conf:ro
     depends_on:
@@ -26,7 +26,7 @@ services:
       - relay_service
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null --no-check-certificate https://127.0.0.1:8088/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null --no-check-certificate https://127.0.0.1:443/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
