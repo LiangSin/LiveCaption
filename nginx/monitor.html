@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>服務監控</title>
+  <style>
+    :root {
+      --bg:             #0b1120;
+      --surface:        #131e30;
+      --surface-2:      #1a2840;
+      --border:         #243350;
+      --border-hover:   #3d5a8a;
+      --text:           #e2e8f0;
+      --text-muted:     #7a92b4;
+      --accent:         #4f7cff;
+      --up:             #22c55e;
+      --up-dim:         #14532d;
+      --up-glow:        rgba(34,197,94,.18);
+      --degraded:       #f59e0b;
+      --degraded-dim:   #451a03;
+      --degraded-glow:  rgba(245,158,11,.18);
+      --down:           #f43f5e;
+      --down-dim:       #4c0519;
+      --down-glow:      rgba(244,63,94,.18);
+      --unknown:        #64748b;
+      --unknown-dim:    #1e293b;
+      --unknown-glow:   rgba(100,116,139,.12);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .brand-text h1 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-text .tagline {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .refresh-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+    }
+
+    .refresh-meta {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .progress-track {
+      width: 140px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #7c3aed);
+      border-radius: 2px;
+      transition: width 1s linear;
+    }
+
+    /* ── Main ── */
+    main {
+      padding: 28px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    /* ── Error banner ── */
+    .error-banner {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: var(--down-dim);
+      border: 1px solid var(--down);
+      color: var(--down);
+      padding: 11px 18px;
+      border-radius: 10px;
+      margin-bottom: 22px;
+      font-size: 0.85rem;
+    }
+
+    .error-banner.visible { display: flex; }
+
+    /* ── Summary pills ── */
+    .summary-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 13px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .pill-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .pill-up       { background: var(--up-dim);       color: var(--up); }
+    .pill-degraded { background: var(--degraded-dim); color: var(--degraded); }
+    .pill-down     { background: var(--down-dim);     color: var(--down); }
+    .pill-unknown  { background: var(--unknown-dim);  color: var(--unknown); }
+    .dot-up        { background: var(--up); }
+    .dot-degraded  { background: var(--degraded); }
+    .dot-down      { background: var(--down); }
+    .dot-unknown   { background: var(--unknown); }
+
+    /* ── Cards grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 22px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .2s, box-shadow .2s, transform .15s;
+      cursor: default;
+    }
+
+    .card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+    }
+
+    .card-up       { box-shadow: 0 0 0 0 var(--up-glow); }
+    .card-up:hover { box-shadow: 0 4px 24px var(--up-glow); }
+    .card-degraded:hover { box-shadow: 0 4px 24px var(--degraded-glow); }
+    .card-down:hover     { box-shadow: 0 4px 24px var(--down-glow); }
+
+    /* Colored top stripe */
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 14px 14px 0 0;
+    }
+    .card-up::before       { background: var(--up); }
+    .card-degraded::before { background: var(--degraded); }
+    .card-down::before     { background: var(--down); }
+    .card-unknown::before  { background: var(--unknown); }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .service-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    /* Status badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .badge-indicator {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .badge-up       { background: var(--up-dim);       color: var(--up); }
+    .badge-degraded { background: var(--degraded-dim); color: var(--degraded); }
+    .badge-down     { background: var(--down-dim);     color: var(--down); }
+    .badge-unknown  { background: var(--unknown-dim);  color: var(--unknown); }
+
+    .ind-up       { background: var(--up); }
+    .ind-degraded { background: var(--degraded); }
+    .ind-down     { background: var(--down); }
+    .ind-unknown  { background: var(--unknown); }
+
+    /* Pulse for "up" only */
+    @keyframes pulse {
+      0%, 100% { transform: scale(1);   opacity: 1;   }
+      50%       { transform: scale(1.5); opacity: .5;  }
+    }
+    .badge-up .badge-indicator { animation: pulse 2.2s ease-in-out infinite; }
+
+    /* Card metadata rows */
+    .card-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .meta-icon { font-size: 0.85em; width: 14px; text-align: center; }
+
+    .warn-text { color: var(--degraded); }
+    .stale-chip {
+      background: var(--degraded-dim);
+      color: var(--degraded);
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 999px;
+    }
+
+    /* Divider */
+    .card-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 14px 0;
+    }
+
+    /* Empty / loading state */
+    .state-message {
+      color: var(--text-muted);
+      text-align: center;
+      padding: 60px 20px;
+      font-size: 0.9rem;
+      grid-column: 1 / -1;
+    }
+
+    /* Skeleton shimmer */
+    @keyframes shimmer {
+      0%   { opacity: .35; }
+      50%  { opacity: .7; }
+      100% { opacity: .35; }
+    }
+
+    .skeleton {
+      background: var(--surface-2);
+      border-radius: 6px;
+      animation: shimmer 1.6s ease-in-out infinite;
+    }
+
+    /* Fade-in for cards */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .card { animation: fadeUp .3s ease both; }
+
+    @media (max-width: 600px) {
+      header { padding: 14px 16px; }
+      main   { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-icon">📡</div>
+    <div class="brand-text">
+      <h1>服務監控</h1>
+      <div class="tagline">Service Status Dashboard</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="refresh-panel">
+      <div class="refresh-meta" id="refresh-meta">正在連線…</div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill" style="width:100%"></div>
+      </div>
+      <div class="refresh-meta" id="countdown-label" style="text-align:right">— 秒後刷新</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="error-banner" id="error-banner">
+    <span>⚠</span>
+    <span>無法連線到監控後端，顯示最後已知狀態。</span>
+  </div>
+  <div class="summary-row" id="summary-row"></div>
+  <div class="grid" id="grid">
+    <div class="state-message">正在載入服務狀態…</div>
+  </div>
+</main>
+
+<script>
+  const REFRESH_SEC = 30;
+  const DOWN_THRESHOLD_SEC = 120;
+
+  const STATUS = {
+    up:       { label: '正常',  en: 'UP',       badge: 'badge-up',       card: 'card-up',       pill: 'pill-up',       dot: 'dot-up',       ind: 'ind-up'       },
+    degraded: { label: '降級',  en: 'DEGRADED', badge: 'badge-degraded', card: 'card-degraded', pill: 'pill-degraded', dot: 'dot-degraded', ind: 'ind-degraded' },
+    down:     { label: '中斷',  en: 'DOWN',     badge: 'badge-down',     card: 'card-down',     pill: 'pill-down',     dot: 'dot-down',     ind: 'ind-down'     },
+    unknown:  { label: '未知',  en: 'UNKNOWN',  badge: 'badge-unknown',  card: 'card-unknown',  pill: 'pill-unknown',  dot: 'dot-unknown',  ind: 'ind-unknown'  },
+  };
+
+  function cfg(status) {
+    return STATUS[status] || STATUS.unknown;
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function relTime(ts) {
+    if (ts == null) return '從未更新';
+    const diff = Math.round(Date.now() / 1000 - ts);
+    if (diff < 5)    return '剛剛';
+    if (diff < 60)   return `${diff} 秒前`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} 分鐘前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} 小時前`;
+    return `${Math.floor(diff / 86400)} 天前`;
+  }
+
+  function absTime(ts) {
+    if (ts == null) return '';
+    return new Date(ts * 1000).toLocaleString('zh-TW', { hour12: false });
+  }
+
+  function isStale(ts) {
+    return ts != null && (Date.now() / 1000 - ts) > DOWN_THRESHOLD_SEC;
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────
+
+  function renderSummary(services) {
+    const counts = { up: 0, degraded: 0, down: 0, unknown: 0 };
+    services.forEach(s => { counts[s.status in counts ? s.status : 'unknown']++; });
+    document.getElementById('summary-row').innerHTML =
+      Object.entries(counts)
+        .filter(([, n]) => n > 0)
+        .map(([st, n]) => {
+          const c = cfg(st);
+          return `<span class="pill ${c.pill}">
+            <span class="pill-dot ${c.dot}"></span>
+            ${c.label} ${n}
+          </span>`;
+        }).join('');
+  }
+
+  function renderGrid(services) {
+    const grid = document.getElementById('grid');
+    if (!services || services.length === 0) {
+      grid.innerHTML = '<div class="state-message">尚未設定任何服務（請編輯 monitor_config.json）</div>';
+      return;
+    }
+    grid.innerHTML = services.map((svc, i) => {
+      const c = cfg(svc.status);
+      const stale = isStale(svc.last_updated);
+      const rel = relTime(svc.last_updated);
+      const abs = absTime(svc.last_updated);
+      const delay = `animation-delay:${i * 40}ms`;
+
+      return `<div class="card ${c.card}" style="${delay}">
+        <div class="card-header">
+          <span class="service-name">${escHtml(svc.name)}</span>
+          <span class="badge ${c.badge}">
+            <span class="badge-indicator ${c.ind}"></span>
+            ${c.en}
+          </span>
+        </div>
+        <div class="card-divider"></div>
+        <div class="card-meta">
+          <div class="meta-row${stale ? ' warn-text' : ''}">
+            <span class="meta-icon">⏱</span>
+            <span title="${escHtml(abs)}">${escHtml(rel)}</span>
+            ${stale ? '<span class="stale-chip">逾時</span>' : ''}
+          </div>
+          ${abs ? `<div class="meta-row">
+            <span class="meta-icon">📅</span>
+            <span>${escHtml(abs)}</span>
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Fetch ────────────────────────────────────────────────────────────────
+
+  let lastData = null;
+
+  async function fetchStatus() {
+    try {
+      const res = await fetch('/monitor/api/status');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      lastData = data;
+      document.getElementById('error-banner').classList.remove('visible');
+      renderSummary(data.services);
+      renderGrid(data.services);
+      document.getElementById('refresh-meta').textContent =
+        `最後更新：${new Date().toLocaleTimeString('zh-TW', { hour12: false })}`;
+    } catch {
+      document.getElementById('error-banner').classList.add('visible');
+      if (lastData) {
+        renderSummary(lastData.services);
+        renderGrid(lastData.services);
+      }
+    }
+  }
+
+  // ── Countdown / progress bar ─────────────────────────────────────────────
+
+  let _timer = null;
+  let _remaining = REFRESH_SEC;
+
+  function tick() {
+    _remaining--;
+    const pct = (_remaining / REFRESH_SEC) * 100;
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('countdown-label').textContent = `${_remaining} 秒後刷新`;
+    if (_remaining <= 0) {
+      clearInterval(_timer);
+      fetchStatus().then(startCycle);
+    }
+  }
+
+  function startCycle() {
+    _remaining = REFRESH_SEC;
+    document.getElementById('progress-fill').style.width = '100%';
+    document.getElementById('countdown-label').textContent = `${_remaining} 秒後刷新`;
+    clearInterval(_timer);
+    _timer = setInterval(tick, 1000);
+  }
+
+  // Also refresh relative timestamps every 15 s without a full fetch
+  setInterval(() => {
+    if (lastData) renderGrid(lastData.services);
+  }, 15000);
+
+  fetchStatus().then(startCycle);
+</script>
+
+</body>
+</html>
