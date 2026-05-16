@@ -10,6 +10,61 @@
     errorEl.hidden = !message;
   }
 
+  function showRateLimitDialog(message) {
+    const existing = document.getElementById("rateLimitDialog");
+    if (existing) existing.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "rateLimitDialog";
+    overlay.style.position = "fixed";
+    overlay.style.inset = "0";
+    overlay.style.zIndex = "1000";
+    overlay.style.display = "flex";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+    overlay.style.padding = "24px";
+    overlay.style.background = "rgba(246, 247, 251, 0.96)";
+
+    const panel = document.createElement("div");
+    panel.style.width = "100%";
+    panel.style.maxWidth = "360px";
+    panel.style.padding = "24px";
+    panel.style.background = "var(--panel, #fff)";
+    panel.style.border = "1px solid var(--border, #d0d7de)";
+    panel.style.borderRadius = "8px";
+    panel.style.boxShadow = "0 10px 30px rgba(15, 20, 40, 0.08)";
+
+    const title = document.createElement("h1");
+    title.style.margin = "0 0 12px";
+    title.style.fontSize = "1.25rem";
+    title.textContent = "請求頻率過高";
+    panel.appendChild(title);
+
+    const body = document.createElement("p");
+    body.style.margin = "0 0 16px";
+    body.style.color = "var(--muted, #4b5563)";
+    body.textContent = message || "請求頻率過高，請稍後再試。";
+    panel.appendChild(body);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.style.width = "100%";
+    button.style.padding = "10px 12px";
+    button.style.fontSize = "1rem";
+    button.style.color = "#fff";
+    button.style.background = "var(--accent, #0f62fe)";
+    button.style.border = "none";
+    button.style.borderRadius = "8px";
+    button.style.cursor = "pointer";
+    button.textContent = "關閉";
+    button.addEventListener("click", () => overlay.remove());
+    panel.appendChild(button);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
   async function loadKeys() {
     try {
       const res = await fetch("/auth/keys", { cache: "no-store" });
@@ -43,6 +98,11 @@
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 429) {
+          showRateLimitDialog(payload.error || "請求頻率過高，請稍後再試。"
+          );
+          return;
+        }
         setError(payload.error || "Invalid key or passkey.");
         return;
       }

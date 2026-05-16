@@ -39,6 +39,9 @@
     if (res.status === 401) {
       throw new Error("SESSION_EXPIRED");
     }
+    if (res.status === 429) {
+      throw new Error("RATE_LIMIT");
+    }
     throw new Error(`HTTP ${res.status}`);
   }
 
@@ -388,6 +391,14 @@
       if (isSessionExpiredError(err)) {
         appendLog("register failed: session expired");
         showSessionExpired();
+        return;
+      }
+      if (err && String(err.message) === "RATE_LIMIT") {
+        appendLog("register failed: rate limited");
+        setSubtitleStatus("register rate limited; please try again later");
+        if (window.LiveCaptionUI && typeof window.LiveCaptionUI.showRateLimitDialog === "function") {
+          window.LiveCaptionUI.showRateLimitDialog(document.body, "請求頻率過高，請稍後再試。" );
+        }
         return;
       }
       appendLog(`register failed (${source}): ${err?.message || err}`);

@@ -255,6 +255,39 @@
     return view;
   }
 
+  function showRateLimitDialog(root, message = "請求頻率過高，請稍後再試。") {
+    const existing = document.getElementById("rateLimitDialog");
+    if (existing) existing.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "rateLimitDialog";
+    overlay.className = "rate-limit-dialog";
+
+    const panel = document.createElement("div");
+    panel.className = "rate-limit-dialog__panel";
+
+    const title = document.createElement("h1");
+    title.className = "rate-limit-dialog__title";
+    title.textContent = "請求頻率過高";
+    panel.appendChild(title);
+
+    const body = document.createElement("p");
+    body.className = "rate-limit-dialog__message";
+    body.textContent = message;
+    panel.appendChild(body);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "rate-limit-dialog__button";
+    button.textContent = "關閉";
+    button.addEventListener("click", () => overlay.remove());
+    panel.appendChild(button);
+
+    overlay.appendChild(panel);
+    (root || document.body).appendChild(overlay);
+    return overlay;
+  }
+
   window.LiveCaptionUI = {
     mount,
     createVideoPanel,
@@ -262,6 +295,7 @@
     showLogin,
     showFatal,
     showSessionExpired,
+    showRateLimitDialog,
   };
 
   mount();
