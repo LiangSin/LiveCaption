@@ -19,6 +19,20 @@ services:
     volumes:
       - ./monitor_service/monitor_config.json:/app/monitor_config.json:ro
 
+  monitor_client:
+    container_name: monitor_client
+    build:
+      context: .
+      dockerfile: monitor_client/Dockerfile
+    env_file:
+      - monitor_client/.env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./monitor_client/probes.json:/app/probes.json:ro
+    depends_on:
+      - monitor_service
+    restart: unless-stopped
+
   nginx:
     container_name: nginx
     build:

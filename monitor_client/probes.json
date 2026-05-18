@@ -1,0 +1,46 @@
+{
+  "_comment": "Keys must exactly match the names in monitor_service/monitor_config.json. Only list services that this monitor_client is responsible for probing (i.e. containers in this Compose stack). External services push their own status independently.",
+
+  "Reverse Proxy (nginx)": {
+    "container": "nginx",
+    "http_probe": {
+      "url": "https://nginx:443/health",
+      "verify_ssl": false,
+      "expected_status": 200,
+      "timeout": 5
+    }
+  },
+
+  "Monitor Service": {
+    "container": "monitor_service",
+    "http_probe": {
+      "url": "http://monitor_service:8080/status",
+      "expected_status": 200,
+      "timeout": 5
+    }
+  },
+
+  "Frontend": {
+    "container": "frontend",
+    "http_probe": {
+      "url": "https://frontend:8088/login",
+      "verify_ssl": false,
+      "expected_status": 200,
+      "timeout": 5
+    }
+  },
+
+  "Relay Service": {
+    "container": "relay_service",
+    "http_probe": {
+      "url": "https://relay_service:9000/healthz",
+      "verify_ssl": false,
+      "expected_status": 200,
+      "timeout": 5
+    }
+  },
+
+  "OME": {
+    "container": "ome"
+  }
+}
