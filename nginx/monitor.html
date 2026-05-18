@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>服務監控</title>
+  <title>Cool Parrot Monitor</title>
   <style>
     :root {
       --bg:             #0b1120;
@@ -64,12 +64,13 @@
       width: 36px;
       height: 36px;
       border-radius: 10px;
-      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
       flex-shrink: 0;
+      color: var(--accent);
     }
 
     .brand-text h1 {
@@ -343,9 +344,13 @@
 
 <header>
   <div class="brand">
-    <div class="brand-icon">📡</div>
+    <div class="brand-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+    </div>
     <div class="brand-text">
-      <h1>服務監控</h1>
+      <h1>Cool Parrot Monitor</h1>
       <div class="tagline">Service Status Dashboard</div>
     </div>
   </div>
@@ -443,7 +448,7 @@
       const abs = absTime(svc.last_updated);
       const delay = `animation-delay:${i * 40}ms`;
 
-      return `<div class="card ${c.card}" style="${delay}">
+      return `<div class="card ${c.card}" data-svc="${escHtml(svc.name)}" style="${delay}">
         <div class="card-header">
           <span class="service-name">${escHtml(svc.name)}</span>
           <span class="badge ${c.badge}">
@@ -453,41 +458,82 @@
         </div>
         <div class="card-divider"></div>
         <div class="card-meta">
-          <div class="meta-row${stale ? ' warn-text' : ''}">
+          <div class="meta-row meta-time${stale ? ' warn-text' : ''}">
             <span class="meta-icon">⏱</span>
-            <span title="${escHtml(abs)}">${escHtml(rel)}</span>
+            <span class="rel-time" title="${escHtml(abs)}">${escHtml(rel)}</span>
             ${stale ? '<span class="stale-chip">逾時</span>' : ''}
           </div>
           ${abs ? `<div class="meta-row">
             <span class="meta-icon">📅</span>
-            <span>${escHtml(abs)}</span>
+            <span class="abs-time">${escHtml(abs)}</span>
           </div>` : ''}
         </div>
       </div>`;
     }).join('');
   }
 
+  // ── In-place time update (no DOM rebuild, no animation) ─────────────────
+
+  function updateRelativeTimes(services) {
+    services.forEach(svc => {
+      const card = document.querySelector(`.card[data-svc="${CSS.escape(svc.name)}"]`);
+      if (!card) return;
+      const stale = isStale(svc.last_updated);
+      const abs = absTime(svc.last_updated);
+      const relEl = card.querySelector('.rel-time');
+      if (relEl) {
+        relEl.textContent = relTime(svc.last_updated);
+        relEl.title = abs || '';
+      }
+      const absEl = card.querySelector('.abs-time');
+      if (absEl) absEl.textContent = abs;
+      const timeRow = card.querySelector('.meta-time');
+      if (timeRow) {
+        timeRow.classList.toggle('warn-text', stale);
+        const chip = timeRow.querySelector('.stale-chip');
+        if (stale && !chip) {
+          const span = document.createElement('span');
+          span.className = 'stale-chip';
+          span.textContent = '逾時';
+          timeRow.appendChild(span);
+        } else if (!stale && chip) {
+          chip.remove();
+        }
+      }
+    });
+  }
+
   // ── Fetch ────────────────────────────────────────────────────────────────
 
   let lastData = null;
+  let lastStatusSnapshot = null;
+
+  function snapshotStatuses(services) {
+    return JSON.stringify(services.map(s => ({ name: s.name, status: s.status })));
+  }
 
   async function fetchStatus() {
     try {
       const res = await fetch('/monitor/api/status');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      lastData = data;
       document.getElementById('error-banner').classList.remove('visible');
+
+      const snapshot = snapshotStatuses(data.services);
+      const changed = snapshot !== lastStatusSnapshot;
+      lastStatusSnapshot = snapshot;
+      lastData = data;
+
       renderSummary(data.services);
-      renderGrid(data.services);
+      if (changed) {
+        renderGrid(data.services);   // full rebuild → triggers fadeUp animation
+      } else {
+        updateRelativeTimes(data.services);   // in-place, no animation
+      }
       document.getElementById('refresh-meta').textContent =
         `最後更新：${new Date().toLocaleTimeString('zh-TW', { hour12: false })}`;
     } catch {
       document.getElementById('error-banner').classList.add('visible');
-      if (lastData) {
-        renderSummary(lastData.services);
-        renderGrid(lastData.services);
-      }
     }
   }
 
@@ -515,9 +561,9 @@
     _timer = setInterval(tick, 1000);
   }
 
-  // Also refresh relative timestamps every 15 s without a full fetch
+  // Refresh relative timestamps every 15 s — in-place only, no animation
   setInterval(() => {
-    if (lastData) renderGrid(lastData.services);
+    if (lastData) updateRelativeTimes(lastData.services);
   }, 15000);
 
   fetchStatus().then(startCycle);
