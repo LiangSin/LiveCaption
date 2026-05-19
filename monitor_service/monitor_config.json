@@ -1,13 +1,13 @@
 {
   "_comment": "Add service names here. Only names in this list are accepted by /monitor/update. Edit and save - changes take effect on the next push/poll without restarting.",
   "services": [
-    "Reverse Proxy (nginx)",
-    "Monitor Service",
+    "User-Side Reverse Proxy (nginx)",
     "Frontend",
     "Relay Service",
     "OME",
-    "Private Relay",
     "WhisperLiveKit",
-    "TranslateGemma"
+    "TranslateGemma",
+    "Private Relay (nginx-rtmp)",
+    "Streaming SSH Tunnel"
   ]
 }
