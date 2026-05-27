@@ -242,22 +242,26 @@
     stopWs();
     setSubtitleStatus("waiting stream signal...");
     asrState = "disconnected";
-    captionItems = [];
-    renderCaptionState();
   }
 
   function normalizeCaptionLines(lines) {
     if (!Array.isArray(lines)) return [];
     return lines.map((line) => {
       if (typeof line === "string") {
-        return { original: line, translation: "" };
+        return { original: line, translation: "", status: "segment", start: null, end: null };
       }
       if (!line || typeof line !== "object") {
-        return { original: "", translation: "" };
+        return { original: "", translation: "", status: "segment", start: null, end: null };
       }
       return {
-        original: String(line.text ?? ""),
-        translation: String(line.translation ?? ""),
+        original: String(line.text ?? line.original ?? ""),
+        translation: String(line.translation ?? line.text_translation ?? line.translated ?? ""),
+        status:
+          line.status === "updating" || line.status === "segment_update"
+            ? line.status
+            : "segment",
+        start: line.start ?? null,
+        end: line.end ?? null,
       };
     });
   }
@@ -270,8 +274,7 @@
     // 檢查是否已經滾動到底部（或接近底部，允許 5px 的誤差）
     const isAtBottom = captionEl.scrollHeight - captionEl.scrollTop - captionEl.clientHeight <= 5;
 
-    captionItems = normalizeCaptionLines(lines);
-    renderCaptionState();
+    applyCaptionUpdates(normalizeCaptionLines(lines));
 
     // 如果之前在底部，則自動滾動到新的底部
     if (isAtBottom) {
@@ -279,36 +282,94 @@
     }
   }
 
+  function updateCaptionItemElement(itemEl, item) {
+    itemEl.textContent = "";
+    itemEl.dataset.captionStatus = item.status;
+
+    const originalEl = document.createElement("div");
+    originalEl.className = "caption-original";
+    originalEl.textContent = item.original || "";
+
+    const translationEl = document.createElement("div");
+    translationEl.className = "caption-translation";
+    translationEl.textContent = item.translation || "";
+
+    if (subtitleMode === "both" || subtitleMode === "zh") {
+      itemEl.appendChild(originalEl);
+    }
+    if (subtitleMode === "both" || subtitleMode === "en") {
+      itemEl.appendChild(translationEl);
+    }
+  }
+
+  function createCaptionItemElement(item) {
+    const itemEl = document.createElement("div");
+    itemEl.className = "caption-item";
+    updateCaptionItemElement(itemEl, item);
+    return itemEl;
+  }
+
+  let currentUpdatingItem = null;
+  let currentUpdatingEl = null;
+  const segmentElementsByStart = new Map();
+
+  function captionStartKey(start) {
+    return JSON.stringify(start ?? null);
+  }
+
+  function clearCurrentUpdating() {
+    if (currentUpdatingEl) {
+      currentUpdatingEl.remove();
+    }
+    currentUpdatingItem = null;
+    currentUpdatingEl = null;
+  }
+
+  function applyCaptionUpdates(items) {
+    if (!captionEl) return;
+    clearCurrentUpdating();
+
+    items.forEach((item) => {
+      if (!item.original && !item.translation) return;
+      if (item.status === "updating") {
+        currentUpdatingItem = item;
+        currentUpdatingEl = createCaptionItemElement(item);
+        captionEl.appendChild(currentUpdatingEl);
+        return;
+      }
+      if (item.status === "segment_update") {
+        const startKey = captionStartKey(item.start);
+        const existingEl = segmentElementsByStart.get(startKey);
+        const existingItem = captionItems.find((candidate) => captionStartKey(candidate.start) === startKey);
+        if (existingEl && existingItem) {
+          Object.assign(existingItem, item, { status: "segment" });
+          updateCaptionItemElement(existingEl, existingItem);
+          return;
+        }
+        item.status = "segment";
+      }
+      item.status = "segment";
+      captionItems.push(item);
+      const itemEl = createCaptionItemElement(item);
+      segmentElementsByStart.set(captionStartKey(item.start), itemEl);
+      captionEl.appendChild(itemEl);
+    });
+  }
+
   function renderCaptionState() {
     if (!captionEl) return;
-
-    if (asrState !== "connected") {
-      captionEl.textContent = "";
-      return;
-    }
-
     captionEl.textContent = "";
+    segmentElementsByStart.clear();
     const fragment = document.createDocumentFragment();
     captionItems.forEach((item) => {
-      const itemEl = document.createElement("div");
-      itemEl.className = "caption-item";
-
-      const originalEl = document.createElement("div");
-      originalEl.className = "caption-original";
-      originalEl.textContent = item.original || "";
-
-      const translationEl = document.createElement("div");
-      translationEl.className = "caption-translation";
-      translationEl.textContent = item.translation || "";
-
-      if (subtitleMode === "both" || subtitleMode === "zh") {
-        itemEl.appendChild(originalEl);
-      }
-      if (subtitleMode === "both" || subtitleMode === "en") {
-        itemEl.appendChild(translationEl);
-      }
+      const itemEl = createCaptionItemElement(item);
+      segmentElementsByStart.set(captionStartKey(item.start), itemEl);
       fragment.appendChild(itemEl);
     });
+    if (currentUpdatingItem) {
+      currentUpdatingEl = createCaptionItemElement(currentUpdatingItem);
+      fragment.appendChild(currentUpdatingEl);
+    }
     captionEl.appendChild(fragment);
   }
 
@@ -389,8 +450,6 @@
       setSubtitleStatus("disconnected");
       // Without relay connection, treat ASR as disconnected from the UI's perspective.
       asrState = "disconnected";
-      captionItems = [];
-      renderCaptionState();
       scheduleIdleNotice();
       const delay = Math.min(wsBackoff, 15000);
       wsBackoff = Math.min(wsBackoff * 2, 15000);
@@ -421,24 +480,19 @@
         appendLog(`ASR status: ${next}${detail ? ` (${detail})` : ""}`);
         asrState = next;
         setSubtitleStatus(`asr:${next}`);
-        if (asrState !== "connected") {
-          // Reset caption state when ASR is not connected.
-          captionItems = [];
-        }
-        renderCaptionState();
         return;
       }
 
       if (payload.type === "caption") {
-        const isPartial = payload.partial || false;
         const lines = Array.isArray(payload.lines) ? payload.lines : [];
-        setSubtitleStatus(isPartial ? "receiving (partial)" : "receiving");
+        const hasUpdating = lines.some((line) => line && line.status === "updating");
+        setSubtitleStatus(hasUpdating ? "receiving (updating)" : "receiving");
         if (lines.length === 0) {
           appendLog("Caption dropped: missing lines[] payload");
           return;
         }
         appendLog(
-          `Caption${isPartial ? " (partial)" : ""}: received ${lines.length} lines`
+          `Caption${hasUpdating ? " (updating)" : ""}: received ${lines.length} lines`
         );
         setCaption(lines);
         return;

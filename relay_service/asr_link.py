@@ -50,6 +50,18 @@ async def asr_link(
     sent_chunks = 0
     last_status: str | None = None
     last_caption: tuple[str, bool] | None = None
+    emitted_segments: dict[str, dict] = {}
+
+    def timestamp_key(value) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    def clean_text(value) -> str:
+        return str(value or "").strip()
+
+    def normalize_timestamp(value):
+        if value is None or value == "":
+            return None
+        return value
 
     async def graceful_stop(ws) -> None:
         """Signal stream end with empty bytes, then wait for ready_to_stop."""
@@ -124,6 +136,7 @@ async def asr_link(
                 # Reset per-connection dedupe state.
                 last_caption = None
                 last_status = None
+                emitted_segments = {}
                 # Expect config message first to learn format.
                 try:
                     config_raw = await asyncio.wait_for(ws.recv(), timeout=5)
@@ -201,7 +214,7 @@ async def asr_link(
                             budget_start_ts = time.monotonic()
 
                 async def receiver():
-                    nonlocal ready_to_stop_seen, last_status, last_caption
+                    nonlocal ready_to_stop_seen, last_status, last_caption, emitted_segments
                     async for message in ws:
                         try:
                             payload = json.loads(message)
@@ -243,58 +256,83 @@ async def asr_link(
                                 if isinstance(line, str):
                                     original = line.strip()
                                     translation = ""
+                                    start = None
+                                    end = None
                                 elif isinstance(line, dict):
-                                    original = (
+                                    original = clean_text(
                                         line.get("original")
                                         or line.get("text")
                                         or line.get("caption")
                                         or line.get("source")
-                                        or ""
-                                    ).strip()
-                                    translation = (
+                                    )
+                                    translation = clean_text(
                                         line.get("translation")
                                         or line.get("text_translation")
+                                        or line.get("translation_text")
                                         or line.get("translated")
-                                        or ""
-                                    ).strip()
+                                        or line.get("translated_text")
+                                        or line.get("target")
+                                        or line.get("target_text")
+                                    )
+                                    start = normalize_timestamp(line.get("start"))
+                                    end = normalize_timestamp(line.get("end"))
                                 else:
                                     continue
-                                if not original and not translation:
+                                if (not original and not translation) or start is None:
                                     continue
                                 normalized_lines.append(
                                     {
                                         "text": original,
                                         "translation": translation,
+                                        "start": start,
+                                        "end": end,
                                     }
                                 )
 
                         buffer_text = (payload.get("buffer_transcription") or "").strip()
                         buffer_translation = (payload.get("buffer_translation") or "").strip()
-                        if buffer_text or buffer_translation:
+                        buffer_start = normalize_timestamp(payload.get("buffer_start") or payload.get("start"))
+                        buffer_end = normalize_timestamp(payload.get("buffer_end") or payload.get("end"))
+                        if (buffer_text or buffer_translation) and buffer_start is not None:
                             normalized_lines.append(
                                 {
                                     "text": buffer_text,
                                     "translation": buffer_translation,
+                                    "start": buffer_start,
+                                    "end": buffer_end,
                                 }
                             )
 
-                        # Keep only latest 30 items for frontend rendering.
-                        normalized_lines = normalized_lines[-30:]
                         if normalized_lines:
-                            partial = bool(buffer_text or buffer_translation)
                             latest = normalized_lines[-1]
+                            outbound_lines = []
+                            for segment in normalized_lines[:-1]:
+                                start_key = timestamp_key(segment["start"])
+                                previous_segment = emitted_segments.get(start_key)
+                                if previous_segment is None:
+                                    emitted_segments[start_key] = segment
+                                    outbound_lines.append({**segment, "status": "segment"})
+                                    continue
+                                if (
+                                    segment.get("text") == previous_segment.get("text")
+                                    and segment.get("translation") == previous_segment.get("translation")
+                                    and segment.get("end") == previous_segment.get("end")
+                                ):
+                                    continue
+                                emitted_segments[start_key] = segment
+                                outbound_lines.append({**segment, "status": "segment_update"})
+                            outbound_lines.append({**latest, "status": "updating"})
                             caption_key = (
-                                json.dumps(normalized_lines, ensure_ascii=False, sort_keys=True),
-                                partial,
+                                json.dumps(outbound_lines, ensure_ascii=False, sort_keys=True),
+                                False,
                             )
                             if caption_key != last_caption:
                                 await broadcaster.broadcast(
                                     {
                                         "type": "caption",
-                                        "lines": normalized_lines,
+                                        "lines": outbound_lines,
                                         "text": latest.get("text", ""),
                                         "translation": latest.get("translation", ""),
-                                        "partial": partial,
                                         "ts": payload["ts"],
                                     }
                                 )
