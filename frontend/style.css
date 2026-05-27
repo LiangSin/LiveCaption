@@ -460,7 +460,7 @@ input[type="text"] {
   min-height: 24px;
   padding: 3px 10px;
   border-radius: 5px;
-  background: #d81920;
+  background: #8c9099;
   color: #ffffff;
   font-size: 12px;
   font-weight: 800;
@@ -468,12 +468,13 @@ input[type="text"] {
   text-transform: uppercase;
 }
 
-.live-badge[hidden] {
-  display: none;
+.live-badge--active {
+  background: #d81920;
 }
 
 .media-toolbar--subtitle {
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .subtitle-mode-button {
@@ -505,6 +506,27 @@ input[type="text"] {
 .subtitle-mode-separator {
   color: var(--muted);
   user-select: none;
+}
+
+.subtitle-font-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.subtitle-font-size-label {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+.subtitle-font-size-slider {
+  width: 112px;
+  accent-color: #282800;
+  cursor: pointer;
 }
 
 .note-area {

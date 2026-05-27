@@ -44,7 +44,6 @@
       liveBadge.id = "liveBadge";
       liveBadge.className = "live-badge";
       liveBadge.textContent = "live";
-      liveBadge.hidden = true;
       toolbar.appendChild(liveBadge);
 
       panel.appendChild(toolbar);
@@ -124,6 +123,27 @@
         toolbar.appendChild(separator);
       }
     });
+
+    const fontSizeControl = document.createElement("div");
+    fontSizeControl.className = "subtitle-font-size-control";
+
+    const fontSizeLabel = document.createElement("span");
+    fontSizeLabel.className = "subtitle-font-size-label";
+    fontSizeLabel.textContent = "A";
+    fontSizeControl.appendChild(fontSizeLabel);
+
+    const fontSizeInput = document.createElement("input");
+    fontSizeInput.id = "subtitleFontSize";
+    fontSizeInput.className = "subtitle-font-size-slider";
+    fontSizeInput.type = "range";
+    fontSizeInput.min = "16";
+    fontSizeInput.max = "32";
+    fontSizeInput.step = "1";
+    fontSizeInput.value = "20";
+    fontSizeInput.setAttribute("aria-label", "調整字幕字體大小");
+    fontSizeControl.appendChild(fontSizeInput);
+
+    toolbar.appendChild(fontSizeControl);
 
     panel.appendChild(toolbar);
 

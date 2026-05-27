@@ -11,6 +11,7 @@
   const noSignalMessage = qs("noSignalMessage");
   const liveBadge = qs("liveBadge");
   const noteArea = qs("noteArea");
+  const subtitleFontSizeControl = qs("subtitleFontSize");
   let sessionExpired = false;
 
   // Mirrors relay_service/resource_manage.py:KEY_RE.
@@ -79,6 +80,42 @@
     });
   }
 
+  function setupSubtitleFontSize() {
+    if (!captionEl || !subtitleFontSizeControl) return;
+    const storageKey = "livecaption:subtitle-font-size";
+    const min = Number(subtitleFontSizeControl.min) || 16;
+    const max = Number(subtitleFontSizeControl.max) || 32;
+
+    function clampFontSize(value) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return 20;
+      return Math.min(max, Math.max(min, parsed));
+    }
+
+    function applyFontSize(value) {
+      const size = clampFontSize(value);
+      captionEl.style.fontSize = `${size}px`;
+      subtitleFontSizeControl.value = String(size);
+      return size;
+    }
+
+    try {
+      applyFontSize(window.localStorage.getItem(storageKey) || subtitleFontSizeControl.value);
+    } catch (err) {
+      console.warn("[frontend] Failed to load subtitle font size:", err);
+      applyFontSize(subtitleFontSizeControl.value);
+    }
+
+    subtitleFontSizeControl.addEventListener("input", () => {
+      const size = applyFontSize(subtitleFontSizeControl.value);
+      try {
+        window.localStorage.setItem(storageKey, String(size));
+      } catch (err) {
+        console.warn("[frontend] Failed to save subtitle font size:", err);
+      }
+    });
+  }
+
   // 等待配置載入
   function waitForConfig() {
     if (!window.FRONTEND_CONFIG) {
@@ -114,6 +151,7 @@
 
   function startApp(streamUrl, relayWsUrl, registerUrl, key) {
     setupNotes(key);
+    setupSubtitleFontSize();
 
     let ws = null;
     let wsBackoff = 1000;
@@ -157,7 +195,7 @@
     const isLive = text === "playing";
     if (player) player.style.display = hasSignal ? "block" : "none";
     if (noSignalMessage) noSignalMessage.style.display = hasSignal ? "none" : "flex";
-    if (liveBadge) liveBadge.hidden = !isLive;
+    if (liveBadge) liveBadge.classList.toggle("live-badge--active", isLive);
   }
 
   function clearStreamRetry() {
