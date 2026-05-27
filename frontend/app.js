@@ -9,6 +9,7 @@
   const captionEl = qs("caption");
   const logEl = qs("log");
   const noSignalMessage = qs("noSignalMessage");
+  const liveBadge = qs("liveBadge");
   let sessionExpired = false;
 
   // Mirrors relay_service/resource_manage.py:KEY_RE.
@@ -106,6 +107,8 @@
     // Subtitle rendering state (driven by ASR backend connection state).
     let asrState = "disconnected"; // "connected" | "connecting" | "disconnected" | "error"
     let captionItems = [];
+    let subtitleMode = "both";
+    const subtitleModeButtons = document.querySelectorAll("[data-subtitle-mode]");
 
     function appendLog(message) {
     const ts = new Date().toISOString();
@@ -130,8 +133,10 @@
 
     // 根據狀態顯示/隱藏影片和訊息
     const hasSignal = text === "playing" || text === "loading...";
+    const isLive = text === "playing";
     if (player) player.style.display = hasSignal ? "block" : "none";
     if (noSignalMessage) noSignalMessage.style.display = hasSignal ? "none" : "flex";
+    if (liveBadge) liveBadge.hidden = !isLive;
   }
 
   function clearStreamRetry() {
@@ -237,12 +242,28 @@
       translationEl.className = "caption-translation";
       translationEl.textContent = item.translation || "";
 
-      itemEl.appendChild(originalEl);
-      itemEl.appendChild(translationEl);
+      if (subtitleMode === "both" || subtitleMode === "zh") {
+        itemEl.appendChild(originalEl);
+      }
+      if (subtitleMode === "both" || subtitleMode === "en") {
+        itemEl.appendChild(translationEl);
+      }
       fragment.appendChild(itemEl);
     });
     captionEl.appendChild(fragment);
   }
+
+  subtitleModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.subtitleMode;
+      if (!["both", "zh", "en"].includes(nextMode)) return;
+      subtitleMode = nextMode;
+      subtitleModeButtons.forEach((item) => {
+        item.setAttribute("aria-pressed", item.dataset.subtitleMode === subtitleMode ? "true" : "false");
+      });
+      renderCaptionState();
+    });
+  });
 
   function scheduleIdleNotice() {
     clearTimeout(idleTimer);

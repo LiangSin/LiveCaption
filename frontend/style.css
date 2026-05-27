@@ -314,7 +314,7 @@ input[type="text"] {
 #app[data-layout="simple"] .page--simple .no-signal-message {
   width: 100%;
   max-width: 100%;
-  max-height: 100%;
+  max-height: calc(100% - 52px);
   min-height: 0;
   object-fit: contain;
 }
@@ -402,6 +402,108 @@ input[type="text"] {
   font-size: 24px;
   font-weight: 600;
   color: var(--muted);
+}
+
+.media-toolbar {
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+}
+
+.toolbar-back-button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: #282800;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.toolbar-back-button::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateX(2px) rotate(45deg);
+}
+
+.toolbar-back-button:hover,
+.toolbar-back-button:focus-visible {
+  background: #3a3a12;
+  color: #ffffff;
+}
+
+.toolbar-back-button:active {
+  background: #1f1f00;
+}
+
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  background: #d81920;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.live-badge[hidden] {
+  display: none;
+}
+
+.media-toolbar--subtitle {
+  gap: 8px;
+}
+
+.subtitle-mode-button {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  box-shadow: none;
+  appearance: none;
+}
+
+.subtitle-mode-button:hover,
+.subtitle-mode-button:focus,
+.subtitle-mode-button:focus-visible,
+.subtitle-mode-button:active {
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+  outline: none;
+}
+
+.subtitle-mode-button[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.subtitle-mode-separator {
+  color: var(--muted);
+  user-select: none;
 }
 
 .status-row {
@@ -540,8 +642,8 @@ input[type="text"] {
 
   #app[data-layout="simple"] .page--simple .video-panel video,
   #app[data-layout="simple"] .page--simple .no-signal-message {
-    max-height: 80vh;
-    max-height: 80dvh;
+    max-height: calc(80vh - 52px);
+    max-height: calc(80dvh - 52px);
   }
 
   #app[data-layout="simple"] .page--simple .subtitle-panel .caption {

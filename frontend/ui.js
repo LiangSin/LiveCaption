@@ -27,6 +27,29 @@
       panel.appendChild(createStatusRow("Video status:", "videoStatus", "waiting for signal"));
     }
 
+    if (!options.overlay) {
+      const toolbar = document.createElement("div");
+      toolbar.className = "media-toolbar media-toolbar--video";
+
+      const backButton = document.createElement("button");
+      backButton.type = "button";
+      backButton.className = "toolbar-back-button";
+      backButton.setAttribute("aria-label", "回上一頁");
+      backButton.addEventListener("click", () => {
+        window.location.href = "/login";
+      });
+      toolbar.appendChild(backButton);
+
+      const liveBadge = document.createElement("span");
+      liveBadge.id = "liveBadge";
+      liveBadge.className = "live-badge";
+      liveBadge.textContent = "live";
+      liveBadge.hidden = true;
+      toolbar.appendChild(liveBadge);
+
+      panel.appendChild(toolbar);
+    }
+
     const video = document.createElement("video");
     video.id = "player";
     video.controls = true;
@@ -66,6 +89,33 @@
     if (showStatus) {
       panel.appendChild(createStatusRow("Subtitle status:", "subtitleStatus", "disconnected"));
     }
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "media-toolbar media-toolbar--subtitle";
+
+    const modes = [
+      ["both", "中+英"],
+      ["zh", "中"],
+      ["en", "英"],
+    ];
+    modes.forEach(([mode, label], index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "subtitle-mode-button";
+      button.dataset.subtitleMode = mode;
+      button.setAttribute("aria-pressed", mode === "both" ? "true" : "false");
+      button.textContent = label;
+      toolbar.appendChild(button);
+
+      if (index < modes.length - 1) {
+        const separator = document.createElement("span");
+        separator.className = "subtitle-mode-separator";
+        separator.textContent = "|";
+        toolbar.appendChild(separator);
+      }
+    });
+
+    panel.appendChild(toolbar);
 
     panel.appendChild(caption);
 
