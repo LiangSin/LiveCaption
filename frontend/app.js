@@ -10,6 +10,7 @@
   const logEl = qs("log");
   const noSignalMessage = qs("noSignalMessage");
   const liveBadge = qs("liveBadge");
+  const noteArea = qs("noteArea");
   let sessionExpired = false;
 
   // Mirrors relay_service/resource_manage.py:KEY_RE.
@@ -60,6 +61,24 @@
     return err && String(err.message || err) === "SESSION_EXPIRED";
   }
 
+  function setupNotes(key) {
+    if (!noteArea) return;
+    const storageKey = `livecaption:notes:${key}`;
+    try {
+      noteArea.value = window.localStorage.getItem(storageKey) || "";
+    } catch (err) {
+      console.warn("[frontend] Failed to load notes:", err);
+    }
+
+    noteArea.addEventListener("input", () => {
+      try {
+        window.localStorage.setItem(storageKey, noteArea.value);
+      } catch (err) {
+        console.warn("[frontend] Failed to save notes:", err);
+      }
+    });
+  }
+
   // 等待配置載入
   function waitForConfig() {
     if (!window.FRONTEND_CONFIG) {
@@ -94,6 +113,8 @@
   }
 
   function startApp(streamUrl, relayWsUrl, registerUrl, key) {
+    setupNotes(key);
+
     let ws = null;
     let wsBackoff = 1000;
     let idleTimer = null;

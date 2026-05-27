@@ -63,6 +63,16 @@
     noSignal.textContent = "Streaming has not started";
     panel.appendChild(noSignal);
 
+    if (!options.overlay) {
+      const noteArea = document.createElement("textarea");
+      noteArea.id = "noteArea";
+      noteArea.className = "note-area";
+      noteArea.placeholder = "筆記區 -- 輸入任何屬於你的內容";
+      noteArea.setAttribute("aria-label", "筆記區");
+      noteArea.spellcheck = false;
+      panel.appendChild(noteArea);
+    }
+
     return panel;
   }
 
