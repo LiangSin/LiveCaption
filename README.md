@@ -16,8 +16,6 @@ This repository provides:
 - **`frontend/`**: a static web UI that
   - plays the live stream and displays real-time captions
   - **`/`**: main viewer interface with stream playback and captions
-  - **`/translate`**: viewer interface with translated captions
-  - **`/dev`**: developer view with detailed status information
 
 Not included in this repository:
 
