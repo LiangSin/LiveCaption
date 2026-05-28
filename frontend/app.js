@@ -618,9 +618,10 @@
   function loadHlsStream(url) {
     const isHlsUrl = url.endsWith(".m3u8");
     const useHlsJs = window.Hls && window.Hls.isSupported() && isHlsUrl;
-    const LIVE_SYNC_TARGET_SECONDS = 2.5;
-    const LIVE_SEEK_THRESHOLD_SECONDS = 12;
-    const LIVE_SEEK_COOLDOWN_MS = 15000;
+    const LIVE_SYNC_TARGET_SECONDS = 1.2;
+    const LIVE_MAX_LATENCY_SECONDS = 4;
+    const LIVE_SEEK_THRESHOLD_SECONDS = 6;
+    const LIVE_SEEK_COOLDOWN_MS = 8000;
     if (liveCatchupTimer) {
       clearInterval(liveCatchupTimer);
       liveCatchupTimer = null;
@@ -629,16 +630,17 @@
     if (useHlsJs) {
       const hls = new window.Hls({
         lowLatencyMode: true,
-        liveSyncDuration: LIVE_SYNC_TARGET_SECONDS, // time difference between live edge and player current time
-        liveMaxLatencyDuration: 8, // maximum tolerance for live edge
-        maxLiveSyncPlaybackRate: 1.05,
+        // Stay close to the LL-HLS edge while keeping a small cushion for jitter.
+        liveSyncDuration: LIVE_SYNC_TARGET_SECONDS,
+        liveMaxLatencyDuration: LIVE_MAX_LATENCY_SECONDS,
+        maxLiveSyncPlaybackRate: 1.1,
         liveDurationInfinity: true,
-        maxBufferLength: 8,
-        maxMaxBufferLength: 12,
+        maxBufferLength: 4,
+        maxMaxBufferLength: 8,
         highBufferWatchdogPeriod: 2,
         maxBufferHole: 0.5,
         maxFragLookUpTolerance: 0.25,
-        backBufferLength: 30,
+        backBufferLength: 15,
         maxRetries: 6,
         startLevel: -1,
         enableWorker: true,
