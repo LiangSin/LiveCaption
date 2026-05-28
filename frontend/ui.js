@@ -46,14 +46,37 @@
       liveBadge.textContent = "live";
       toolbar.appendChild(liveBadge);
 
+      const muteButton = document.createElement("button");
+      muteButton.type = "button";
+      muteButton.id = "muteToggleButton";
+      muteButton.className = "mute-toggle-button";
+      muteButton.innerHTML = `
+        <svg class="mute-toggle-button__icon mute-toggle-button__icon--muted" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9v6h4l5 4V5L8 9H4z"></path>
+          <path d="M19 5L5 19"></path>
+        </svg>
+        <svg class="mute-toggle-button__icon mute-toggle-button__icon--sound" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9v6h4l5 4V5L8 9H4z"></path>
+          <path d="M16 8.5a5 5 0 0 1 0 7"></path>
+          <path d="M18.5 6a8.5 8.5 0 0 1 0 12"></path>
+        </svg>
+      `;
+      muteButton.setAttribute("aria-pressed", "true");
+      muteButton.setAttribute("aria-label", "目前靜音，點擊切換為非靜音");
+      toolbar.appendChild(muteButton);
+
       panel.appendChild(toolbar);
     }
 
     const video = document.createElement("video");
     video.id = "player";
-    video.controls = true;
+    video.controls = false;
     video.playsInline = true;
     video.muted = true;
+    video.disablePictureInPicture = true;
+    video.controlsList = "nodownload nofullscreen noremoteplayback";
+    video.tabIndex = -1;
+    video.setAttribute("aria-label", "直播畫面");
     panel.appendChild(video);
 
     const noSignal = document.createElement("div");

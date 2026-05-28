@@ -11,8 +11,10 @@
   const noSignalMessage = qs("noSignalMessage");
   const liveBadge = qs("liveBadge");
   const noteArea = qs("noteArea");
+  const muteToggleButton = qs("muteToggleButton");
   const subtitleFontSizeControl = qs("subtitleFontSize");
   let sessionExpired = false;
+  let videoMuted = true;
 
   // Mirrors relay_service/resource_manage.py:KEY_RE.
   const KEY_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -116,6 +118,33 @@
     });
   }
 
+  function applyVideoMuteState() {
+    if (player) player.muted = videoMuted;
+    if (!muteToggleButton) return;
+    muteToggleButton.setAttribute("aria-pressed", videoMuted ? "true" : "false");
+    muteToggleButton.setAttribute(
+      "aria-label",
+      videoMuted ? "目前靜音，點擊切換為非靜音" : "目前非靜音，點擊切換為靜音"
+    );
+  }
+
+  function setupVideoControls() {
+    if (!player) return;
+    player.controls = false;
+    player.disablePictureInPicture = true;
+    player.controlsList = "nodownload nofullscreen noremoteplayback";
+    player.tabIndex = -1;
+    player.addEventListener("contextmenu", (evt) => evt.preventDefault());
+
+    if (muteToggleButton) {
+      muteToggleButton.addEventListener("click", () => {
+        videoMuted = !videoMuted;
+        applyVideoMuteState();
+      });
+    }
+    applyVideoMuteState();
+  }
+
   // 等待配置載入
   function waitForConfig() {
     if (!window.FRONTEND_CONFIG) {
@@ -152,6 +181,7 @@
   function startApp(streamUrl, relayWsUrl, registerUrl, key) {
     setupNotes(key);
     setupSubtitleFontSize();
+    setupVideoControls();
 
     let ws = null;
     let wsBackoff = 1000;
@@ -722,8 +752,7 @@
       player.addEventListener("canplay", () => markStreamPlayable("video canplay"), { once: true });
       player.addEventListener("playing", () => markStreamPlayable("video playing"), { once: true });
 
-      // 對於直播，設置靜音以增加自動播放成功率
-      player.muted = true;
+      applyVideoMuteState();
 
       // 嘗試自動播放
       const tryPlay = () => {
@@ -741,7 +770,7 @@
 
     // Native playback (e.g., MP4 progressive, WebRTC blob URL, etc.)
     player.src = url;
-    player.muted = true; // 設置靜音以增加自動播放成功率
+    applyVideoMuteState();
     if (liveCatchupTimer) {
       clearInterval(liveCatchupTimer);
       liveCatchupTimer = null;

@@ -243,6 +243,8 @@ input[type="text"] {
   background: #0d1117;
   border-radius: 10px;
   border: 1px solid var(--border);
+  pointer-events: none;
+  user-select: none;
 }
 
 .page--simple .video-panel {
@@ -451,6 +453,59 @@ input[type="text"] {
 
 .toolbar-back-button:active {
   background: #1f1f00;
+}
+
+.mute-toggle-button {
+  width: 34px;
+  height: 30px;
+  min-height: 30px;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #282800;
+  border-radius: 8px;
+  background: transparent;
+  color: #282800;
+}
+
+.mute-toggle-button:hover,
+.mute-toggle-button:focus-visible {
+  background: rgba(40, 40, 0, 0.08);
+  color: #282800;
+}
+
+.mute-toggle-button[aria-pressed="false"] {
+  background: #282800;
+  color: #ffffff;
+}
+
+.mute-toggle-button[aria-pressed="false"]:hover,
+.mute-toggle-button[aria-pressed="false"]:focus-visible {
+  background: #3a3a12;
+  color: #ffffff;
+}
+
+.mute-toggle-button__icon {
+  width: 20px;
+  height: 20px;
+  display: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.mute-toggle-button__icon path:first-child {
+  fill: currentColor;
+  stroke: none;
+}
+
+.mute-toggle-button[aria-pressed="true"] .mute-toggle-button__icon--muted,
+.mute-toggle-button[aria-pressed="false"] .mute-toggle-button__icon--sound {
+  display: block;
 }
 
 .live-badge {
