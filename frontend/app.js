@@ -588,6 +588,9 @@
   function loadHlsStream(url) {
     const isHlsUrl = url.endsWith(".m3u8");
     const useHlsJs = window.Hls && window.Hls.isSupported() && isHlsUrl;
+    const LIVE_SYNC_TARGET_SECONDS = 2.5;
+    const LIVE_SEEK_THRESHOLD_SECONDS = 12;
+    const LIVE_SEEK_COOLDOWN_MS = 15000;
     if (liveCatchupTimer) {
       clearInterval(liveCatchupTimer);
       liveCatchupTimer = null;
@@ -596,20 +599,20 @@
     if (useHlsJs) {
       const hls = new window.Hls({
         lowLatencyMode: true,
-        liveSyncDuration: 0.5, // time difference between live edge and player current time
-        liveMaxLatencyDuration: 2, // maximum tolerance for live edge
-        maxLiveSyncPlaybackRate: 1,
+        liveSyncDuration: LIVE_SYNC_TARGET_SECONDS, // time difference between live edge and player current time
+        liveMaxLatencyDuration: 8, // maximum tolerance for live edge
+        maxLiveSyncPlaybackRate: 1.05,
         liveDurationInfinity: true,
-        maxBufferLength: 3,
-        maxMaxBufferLength: 6,
-        highBufferWatchdogPeriod: 1,
-        maxBufferHole: 0.3,
-        maxFragLookUpTolerance: 0.1,
-        backBufferLength: 0,
+        maxBufferLength: 8,
+        maxMaxBufferLength: 12,
+        highBufferWatchdogPeriod: 2,
+        maxBufferHole: 0.5,
+        maxFragLookUpTolerance: 0.25,
+        backBufferLength: 30,
         maxRetries: 6,
         startLevel: -1,
         enableWorker: true,
-        debug: true,
+        debug: false,
         xhrSetup: (xhr) => {
           xhr.withCredentials = true;
         },
@@ -630,13 +633,16 @@
         onStreamPlayable(source);
       };
 
-      const maybeCatchUp = (source) => {
+      const maybeRecoverLargeLatency = (source) => {
         if (player.seeking) return;
         const liveSyncPosition = hls.liveSyncPosition;
         if (!Number.isFinite(liveSyncPosition)) return;
         const delta = liveSyncPosition - player.currentTime;
-        if (delta > 5 && Date.now() - lastCatchUpAt > 4000) {
-          appendLog(`Live sync jump (${source}): behind ${delta.toFixed(1)}s`);
+        if (
+          delta > LIVE_SEEK_THRESHOLD_SECONDS &&
+          Date.now() - lastCatchUpAt > LIVE_SEEK_COOLDOWN_MS
+        ) {
+          appendLog(`Live sync recovery (${source}): behind ${delta.toFixed(1)}s`);
           player.currentTime = liveSyncPosition;
           lastCatchUpAt = Date.now();
         }
@@ -683,20 +689,20 @@
       });
 
       hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
-        maybeCatchUp("frag");
+        maybeRecoverLargeLatency("frag");
         if (player.readyState >= 2) {
           markStreamPlayable("fragment buffered");
         }
       });
 
-      // 直播同步事件 - 確保播放最新內容
+      // Let hls.js stay close to the target latency; only intervene after large drift.
       hls.on(window.Hls.Events.LIVE_BACK_BUFFER_REACHED, () => {
         appendLog("Live sync: reached back buffer");
       });
 
       hls.on(window.Hls.Events.LIVE_SYNCING, () => {
-        appendLog("Live sync: syncing to live edge");
-        maybeCatchUp("sync");
+        appendLog("Live sync: syncing toward target latency");
+        maybeRecoverLargeLatency("sync");
       });
 
       // 如果超過 30 秒還沒有載入成功，認為沒有訊號
@@ -756,10 +762,11 @@
         if (player.seeking) return;
         if (!player.seekable || player.seekable.length === 0) return;
         const liveEdge = player.seekable.end(player.seekable.length - 1);
-        const delta = liveEdge - player.currentTime;
-        if (delta > 5) {
-          appendLog(`Live sync jump (native): behind ${delta.toFixed(1)}s`);
-          player.currentTime = Math.max(0, liveEdge - 0.5);
+        const targetPosition = Math.max(0, liveEdge - LIVE_SYNC_TARGET_SECONDS);
+        const delta = targetPosition - player.currentTime;
+        if (delta > LIVE_SEEK_THRESHOLD_SECONDS) {
+          appendLog(`Live sync recovery (native): behind ${delta.toFixed(1)}s`);
+          player.currentTime = targetPosition;
         }
       };
       player.addEventListener("loadedmetadata", maybeCatchUpNative, { once: true });
