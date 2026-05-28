@@ -1,8 +1,10 @@
 (function () {
   const form = document.getElementById("loginForm");
   const keySelect = document.getElementById("loginKey");
+  const passkeyLabel = document.getElementById("loginPasskeyLabel");
   const passkeyInput = document.getElementById("loginPasskey");
   const errorEl = document.getElementById("loginError");
+  let keyCheckSeq = 0;
 
   function setError(message) {
     if (!errorEl) return;
@@ -65,6 +67,39 @@
     return overlay;
   }
 
+  function redirectForKey(key, redirect) {
+    window.location.href = redirect || `/?src=${encodeURIComponent(key)}`;
+  }
+
+  function setPasskeyVisible(visible) {
+    if (passkeyLabel) passkeyLabel.hidden = !visible;
+    passkeyInput.hidden = !visible;
+    passkeyInput.required = visible;
+  }
+
+  async function checkCookieForKey(key) {
+    if (!key) return;
+    const seq = ++keyCheckSeq;
+    try {
+      const res = await fetch(`/auth/session?key=${encodeURIComponent(key)}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (seq !== keyCheckSeq) return;
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      if (payload.can_auto_login) {
+        redirectForKey(key, payload.redirect);
+        return;
+      }
+      passkeyInput.focus();
+    } catch (err) {
+      if (seq === keyCheckSeq) {
+        passkeyInput.focus();
+      }
+    }
+  }
+
   async function loadKeys() {
     try {
       const res = await fetch("/auth/keys", { cache: "no-store" });
@@ -72,6 +107,12 @@
       const payload = await res.json();
       const keys = Array.isArray(payload.keys) ? payload.keys : [];
       keySelect.textContent = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Select a key";
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      keySelect.appendChild(placeholder);
       keys.forEach((key) => {
         const option = document.createElement("option");
         option.value = key;
@@ -84,11 +125,29 @@
     }
   }
 
+  keySelect.addEventListener("change", () => {
+    const key = keySelect.value;
+    setError("");
+    passkeyInput.value = "";
+    setPasskeyVisible(Boolean(key));
+    checkCookieForKey(key);
+  });
+
   form.addEventListener("submit", async (evt) => {
     evt.preventDefault();
     setError("");
     const key = keySelect.value;
     const passkey = passkeyInput.value;
+    if (!key) {
+      setError("Please select a key.");
+      keySelect.focus();
+      return;
+    }
+    if (!passkey) {
+      setError("Please enter the passkey.");
+      passkeyInput.focus();
+      return;
+    }
     try {
       const res = await fetch("/auth/login", {
         method: "POST",
@@ -106,11 +165,12 @@
         setError(payload.error || "Invalid key or passkey.");
         return;
       }
-      window.location.href = payload.redirect || `/?src=${encodeURIComponent(key)}`;
+      redirectForKey(key, payload.redirect);
     } catch (err) {
       setError(`Login failed: ${err.message || err}`);
     }
   });
 
-  loadKeys().then(() => passkeyInput.focus());
+  setPasskeyVisible(false);
+  loadKeys().then(() => keySelect.focus());
 })();

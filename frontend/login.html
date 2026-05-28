@@ -12,8 +12,8 @@
       <h1 class="login-view__title">LiveCaption Login</h1>
       <label class="login-view__label" for="loginKey">Key</label>
       <select id="loginKey" class="login-view__input" name="key" required></select>
-      <label class="login-view__label" for="loginPasskey">Passkey</label>
-      <input id="loginPasskey" class="login-view__input" type="password" name="passkey" inputmode="text" autocomplete="current-password" required />
+      <label id="loginPasskeyLabel" class="login-view__label" for="loginPasskey" hidden>Passkey</label>
+      <input id="loginPasskey" class="login-view__input" type="password" name="passkey" inputmode="text" autocomplete="current-password" hidden />
       <button class="login-view__button" type="submit">Login</button>
       <p id="loginError" class="login-view__error" hidden></p>
     </form>

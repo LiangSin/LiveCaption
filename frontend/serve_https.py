@@ -20,7 +20,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 
 AUTH_COOKIE_NAME = "livecaption_auth"
@@ -136,7 +136,7 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
             cookies[name.strip()] = value.strip()
         return cookies
 
-    def _validate_cookie(self) -> str | None:
+    def _validate_cookie_session(self) -> tuple[str, int] | None:
         value = self._parse_cookies().get(AUTH_COOKIE_NAME)
         if not value or "." not in value:
             return None
@@ -151,11 +151,16 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
         exp = data.get("exp")
         if not isinstance(key, str) or not isinstance(exp, int):
             return None
-        if exp < int(time.time()):
+        remaining_seconds = exp - int(time.time())
+        if remaining_seconds < 0:
             return None
         if key not in self._load_auth_keys():
             return None
-        return key
+        return key, remaining_seconds
+
+    def _validate_cookie(self) -> str | None:
+        session = self._validate_cookie_session()
+        return session[0] if session else None
 
     def _key_from_original_uri(self) -> str | None:
         original = self.headers.get("X-Original-URI", self.path)
@@ -196,6 +201,32 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
                 self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "auth keys unavailable"})
                 return
             self._send_json(HTTPStatus.OK, {"keys": keys})
+            return
+
+        if parsed.path == "/auth/session":
+            requested_key = parse_qs(parsed.query).get("key", [""])[0].strip()
+            payload: dict[str, Any] = {
+                "authenticated": False,
+                "can_auto_login": False,
+                "auth_ttl_seconds": AUTH_TTL_SECONDS,
+            }
+            try:
+                session = self._validate_cookie_session()
+            except OSError:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "auth keys unavailable"})
+                return
+            if session and requested_key and hmac.compare_digest(session[0], requested_key):
+                remaining_seconds = session[1]
+                payload.update(
+                    {
+                        "authenticated": True,
+                        "key": requested_key,
+                        "ttl_seconds": remaining_seconds,
+                        "can_auto_login": remaining_seconds >= 0.5 * AUTH_TTL_SECONDS,
+                        "redirect": f"/?src={quote(requested_key, safe='')}",
+                    }
+                )
+            self._send_json(HTTPStatus.OK, payload)
             return
 
         if parsed.path == "/auth/verify":
@@ -239,7 +270,7 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
             "Set-Cookie",
             f"{AUTH_COOKIE_NAME}={cookie}; Max-Age={AUTH_TTL_SECONDS}; Path=/; Secure; HttpOnly; SameSite=Lax",
         )
-        body = json.dumps({"ok": True, "redirect": f"/?src={key}"}).encode("utf-8")
+        body = json.dumps({"ok": True, "redirect": f"/?src={quote(key, safe='')}"}).encode("utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
