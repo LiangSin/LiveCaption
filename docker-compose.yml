@@ -33,6 +33,25 @@ services:
       - monitor_service
     restart: unless-stopped
 
+  asr_proxy:
+    container_name: asr_proxy
+    build:
+      context: .
+      dockerfile: asr_proxy/Dockerfile
+    volumes:
+      - ./asr_proxy/asr_proxy.conf:/etc/nginx/nginx.conf:ro
+      - ./asr_proxy/backends.conf:/etc/nginx/asr_backends.conf:ro
+      - ./ssl-config:/etc/nginx/ssl:ro
+    expose:
+      - "9001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --no-check-certificate https://127.0.0.1:9001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
   nginx:
     container_name: nginx
     build:
@@ -65,6 +84,8 @@ services:
       dockerfile: relay_service/Dockerfile
     env_file:
       - relay_service/.env
+    depends_on:
+      - asr_proxy
 
   frontend:
     container_name: frontend
