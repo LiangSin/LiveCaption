@@ -26,7 +26,6 @@ class RelayConfig:
     stop_timeout_seconds: int = _env("STOP_TIMEOUT_SECONDS", cast=int, default=10)
     # Bitrate for opus when using webm.
     asr_audio_bitrate: str = _env("ASR_AUDIO_BITRATE", default="32k")
-    cert: str | None = _env("CERT")
 
 
 def load_config() -> RelayConfig:

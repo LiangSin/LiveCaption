@@ -1,8 +1,6 @@
 import asyncio
 import json
 import logging
-import os
-import ssl
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Set
@@ -93,31 +91,6 @@ class SubtitleBroadcaster:
             except Exception:
                 pass
 
-
-def build_ssl_context(cert: str | None) -> ssl.SSLContext | None:
-    """Create an SSL context that trusts the provided CERT env content/path."""
-    if not cert:
-        return None
-
-    try:
-        ctx = ssl.create_default_context()
-        ctx.load_verify_locations(cadata=cert)
-        ctx.check_hostname = False
-        logger.info("loaded CERT from inline PEM")
-        return ctx
-    except ssl.SSLError:
-        # Fall back to treating CERT as a file path.
-        if os.path.exists(cert):
-            ctx = ssl.create_default_context()
-            ctx.load_verify_locations(cafile=cert)
-            ctx.check_hostname = False
-            logger.info("loaded CERT from path: %s", cert)
-            return ctx
-
-    logger.error("CERT is set but could not be loaded as PEM content or file path")
-    raise ssl.SSLError("invalid CERT value; provide PEM content or path to a PEM file")
-
-
 def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
     # Lazy import to break circular dependency (resource_manage imports from this module).
     from .resource_manage import (
@@ -128,11 +101,9 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
         validate_key,
     )
 
-    ssl_context = build_ssl_context(cfg.cert)
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.manager = SessionManager(cfg, ssl_context, debug_mode)
+        app.state.manager = SessionManager(cfg, debug_mode)
         logger.info("relay startup complete")
         try:
             yield

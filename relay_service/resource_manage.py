@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import re
-import ssl
 from enum import Enum
 
 from .app import SubtitleBroadcaster
@@ -51,13 +50,11 @@ class StreamSession:
         self,
         key: str,
         cfg: RelayConfig,
-        ssl_context: ssl.SSLContext | None,
         debug_mode: bool,
         manager: "SessionManager",
     ):
         self.key = key
         self.cfg = cfg
-        self.ssl_context = ssl_context
         self.debug_mode = debug_mode
         self._manager = manager
 
@@ -109,7 +106,6 @@ class StreamSession:
                 self.stream_end_event,
                 self.restart_ingest_event,
                 self.debug_mode,
-                self.ssl_context,
             ),
             name=f"asr[{self.key}]",
         )
@@ -204,11 +200,9 @@ class SessionManager:
     def __init__(
         self,
         cfg: RelayConfig,
-        ssl_context: ssl.SSLContext | None,
         debug_mode: bool,
     ):
         self.cfg = cfg
-        self.ssl_context = ssl_context
         self.debug_mode = debug_mode
         self._sessions: dict[str, StreamSession] = {}
         self._lock = asyncio.Lock()
@@ -221,7 +215,6 @@ class SessionManager:
             session = StreamSession(
                 key=key,
                 cfg=self.cfg,
-                ssl_context=self.ssl_context,
                 debug_mode=self.debug_mode,
                 manager=self,
             )

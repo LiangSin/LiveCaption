@@ -25,6 +25,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger("relay")
 
 
+def build_unverified_ssl_context() -> ssl.SSLContext:
+    """Create a TLS client context that accepts self-signed ASR certificates."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 async def asr_link(
     cfg: RelayConfig,
     audio_queue: AudioQueue,
@@ -35,7 +43,6 @@ async def asr_link(
     stream_end_event: asyncio.Event,
     restart_ingest_event: asyncio.Event,
     debug_mode: bool = False,
-    ssl_context: ssl.SSLContext | None = None,
 ):
     """Send PCM to ASR service and forward captions to frontends.
 
@@ -122,7 +129,7 @@ async def asr_link(
         try:
             logger.info("connecting to ASR at %s", cfg.asr_ws_url)
             await broadcaster.broadcast_asr_status("connecting", "connecting to ASR backend")
-            ssl_ctx = ssl_context if cfg.asr_ws_url.startswith("wss://") else None
+            ssl_ctx = build_unverified_ssl_context() if cfg.asr_ws_url.startswith("wss://") else None
             async with websockets.connect(
                 cfg.asr_ws_url,
                 max_size=None,
