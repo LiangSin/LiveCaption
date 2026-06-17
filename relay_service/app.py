@@ -1,8 +1,9 @@
 import asyncio
 import json
 import logging
+from collections import deque
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Set
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -15,10 +16,14 @@ logger = logging.getLogger("relay")
 class SubtitleBroadcaster:
     """Tracks connected frontend clients and pushes caption/status messages."""
 
-    def __init__(self) -> None:
+    _RECENT_SUBTITLE_TYPES = {"caption", "caption_translation"}
+
+    def __init__(self, recent_subtitle_minutes: float) -> None:
         self._clients: Set[WebSocket] = set()
         self._lock = asyncio.Lock()
         self._last_asr_status: dict | None = None
+        self._recent_window = timedelta(minutes=max(0.0, recent_subtitle_minutes))
+        self._recent_subtitles: deque[tuple[datetime, dict]] = deque()
 
     async def register(self, ws: WebSocket):
         async with self._lock:
@@ -38,6 +43,7 @@ class SubtitleBroadcaster:
 
     async def broadcast(self, payload: dict):
         """Send JSON payload to every client, dropping closed sockets."""
+        await self._remember_recent_subtitle(payload)
         if not self._clients:
             return
         data = json.dumps(payload)
@@ -52,6 +58,28 @@ class SubtitleBroadcaster:
             async with self._lock:
                 for ws in dead:
                     self._clients.discard(ws)
+
+    async def _remember_recent_subtitle(self, payload: dict) -> None:
+        if (
+            payload.get("type") not in self._RECENT_SUBTITLE_TYPES
+            or self._recent_window.total_seconds() <= 0
+        ):
+            return
+        now = datetime.now(timezone.utc)
+        async with self._lock:
+            self._recent_subtitles.append((now, dict(payload)))
+            self._prune_recent_subtitles(now)
+
+    def _prune_recent_subtitles(self, now: datetime) -> None:
+        cutoff = now - self._recent_window
+        while self._recent_subtitles and self._recent_subtitles[0][0] < cutoff:
+            self._recent_subtitles.popleft()
+
+    async def recent_subtitles(self) -> list[dict]:
+        now = datetime.now(timezone.utc)
+        async with self._lock:
+            self._prune_recent_subtitles(now)
+            return [dict(payload) for _, payload in self._recent_subtitles]
 
     async def broadcast_status(self, state: str, detail: str = ""):
         await self.broadcast(
@@ -123,7 +151,11 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
             session = await app.state.manager.register(src)
         except DuplicateKeyError:
             raise HTTPException(status_code=409, detail=f"session already registered: {src}")
-        return {"key": session.key, "subtitles_url": f"/subtitles/{session.key}"}
+        return {
+            "key": session.key,
+            "subtitles_url": f"/subtitles/{session.key}",
+            "subtitles_recent_url": f"/subtitles_recent/{session.key}",
+        }
 
     @app.websocket("/subtitles/{key}")
     async def subtitles_ws(ws: WebSocket, key: str):
@@ -152,6 +184,24 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
             pass
         finally:
             await session.broadcaster.unregister(ws)
+
+    @app.get("/subtitles_recent/{key}")
+    async def subtitles_recent(key: str):
+        try:
+            validate_key(key)
+        except InvalidKeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        session = app.state.manager.get(key)
+        if session is None or session.state in (
+            SessionState.TERMINATING,
+            SessionState.TERMINATED,
+        ):
+            raise HTTPException(status_code=404, detail=f"session not found: {key}")
+        return {
+            "key": key,
+            "window_minutes": cfg.recent_subtitle_minutes,
+            "subtitles": await session.broadcaster.recent_subtitles(),
+        }
 
     @app.get("/healthz")
     async def healthcheck():

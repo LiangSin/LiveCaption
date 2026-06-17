@@ -18,6 +18,11 @@ class RelayConfig:
     asr_ws_url: str = _env("ASR_WS_URL", "ws://127.0.0.1:9001/asr")
     host: str = _env("RELAY_HOST", "0.0.0.0")
     port: int = _env("RELAY_PORT", cast=int, default=9000)
+    recent_subtitle_minutes: float = _env(
+        "RECENT_SUBTITLE_MINUTES",
+        cast=float,
+        default=10,
+    )
     chunk_ms: int = _env("CHUNK_MS", cast=int, default=500)
     sample_rate: int = _env("SAMPLE_RATE", cast=int, default=16000)
     max_backoff_seconds: int = _env("MAX_BACKOFF_SECONDS", cast=int, default=30)

@@ -92,6 +92,12 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def end_headers(self) -> None:
+        path = urlparse(self.path).path
+        if path in {"/", "/index.html", "/app.js", "/config.js"}:
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def _read_json_body(self) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -170,6 +176,9 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
             parts = path.split("/")
             return parts[2] if len(parts) > 2 and parts[2] else None
         if path.startswith("/subtitles/"):
+            parts = path.split("/")
+            return parts[2] if len(parts) > 2 and parts[2] else None
+        if path.startswith("/subtitles_recent/"):
             parts = path.split("/")
             return parts[2] if len(parts) > 2 and parts[2] else None
         if path == "/register":

@@ -58,7 +58,7 @@ class StreamSession:
         self.debug_mode = debug_mode
         self._manager = manager
 
-        self.broadcaster = SubtitleBroadcaster()
+        self.broadcaster = SubtitleBroadcaster(cfg.recent_subtitle_minutes)
         self.audio_queue = AudioQueue()
         self.fmt_controller = FormatController("webm")
         self.ingest_epoch = IngestEpoch()
