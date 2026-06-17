@@ -633,7 +633,7 @@
         // Stay close to the LL-HLS edge while keeping a small cushion for jitter.
         liveSyncDuration: LIVE_SYNC_TARGET_SECONDS,
         liveMaxLatencyDuration: LIVE_MAX_LATENCY_SECONDS,
-        maxLiveSyncPlaybackRate: 1.1,
+        maxLiveSyncPlaybackRate: 1,
         liveDurationInfinity: true,
         maxBufferLength: 4,
         maxMaxBufferLength: 8,
