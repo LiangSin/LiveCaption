@@ -1,11 +1,16 @@
-FROM nginx:stable-alpine
+FROM haproxy:lts-alpine
 
-RUN apk add --no-cache openssl
+USER root
 
-COPY asr_proxy/asr_proxy.conf /etc/nginx/nginx.conf
-COPY asr_proxy/backends.conf /etc/nginx/asr_backends.conf
-COPY asr_proxy/check_backends.sh /docker-entrypoint.d/40-check-asr-backends.sh
+RUN apk add --no-cache openssl socat
 
-RUN chmod +x /docker-entrypoint.d/40-check-asr-backends.sh
+COPY asr_proxy/haproxy.cfg /usr/local/etc/haproxy/haproxy.cfg
+COPY asr_proxy/backends.conf /usr/local/etc/haproxy/backends.cfg
+COPY asr_proxy/start-asr-proxy.sh /usr/local/bin/start-asr-proxy.sh
+COPY asr_proxy/log-backend-status.sh /usr/local/bin/log-backend-status.sh
+
+RUN chmod +x /usr/local/bin/start-asr-proxy.sh /usr/local/bin/log-backend-status.sh
 
 EXPOSE 9001
+
+CMD ["/usr/local/bin/start-asr-proxy.sh"]

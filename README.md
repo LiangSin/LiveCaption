@@ -13,7 +13,7 @@ This repository provides:
   - pulls audio from an **RTMP** stream via FFmpeg
   - forwards audio to the internal **ASR reverse proxy**
   - relays caption/status messages to browsers via a **WebSocket** endpoint (`/subtitles`)
-- **`asr_proxy/`**: an Nginx reverse proxy that
+- **`asr_proxy/`**: a HAProxy reverse proxy that
   - load-balances relay ASR WebSocket sessions across configured ASR backends
   - passes WebSocket frames through without interpreting the ASR protocol
 - **`frontend/`**: a static web UI that
@@ -93,23 +93,23 @@ What these mean:
 Configure ASR backends directly in `asr_proxy/backends.conf`:
 
 ```nginx
-server 10.0.0.11:8000 max_fails=3 fail_timeout=10s;
-server 10.0.0.12:8000 max_fails=3 fail_timeout=10s;
+server asr_10_0_0_11 10.0.0.11:8000 ssl verify none maxconn 2 check check-ssl
+server asr_10_0_0_12 10.0.0.12:8000 ssl verify none maxconn 4 check check-ssl
 ```
 
-`asr_proxy` is an internal Nginx WebSocket reverse proxy. It chooses one backend when the relay opens `/asr`, keeps that WebSocket pinned to the selected backend, and forwards frames in both directions until either side closes. It does not parse audio chunks, captions, empty stream-end frames, or `ready_to_stop` messages.
+`asr_proxy` is an internal HAProxy WebSocket reverse proxy. It chooses one backend when the relay opens `/asr`, keeps that WebSocket pinned to the selected backend, and forwards frames in both directions until either side closes. It does not parse audio chunks, captions, empty stream-end frames, or `ready_to_stop` messages.
 
-Backend selection uses Nginx `least_conn` with a shared upstream `zone`, so active WebSocket connection counts are shared across all Nginx worker processes. Without the shared zone, each worker would keep its own counters and low connection counts could cluster on the same backend.
+Backend selection uses HAProxy `leastconn` plus per-server `maxconn`, with `option redispatch` enabled so a request queued behind a saturated server can be retried on another available backend. If every backend is full, requests wait only briefly (`timeout queue 250ms`) and then fail instead of being hidden in a long queue.
 
 Both connection legs are encrypted:
 
 - relay -> `asr_proxy`: `asr_proxy` terminates TLS using `ssl-config/cert.pem`; the relay intentionally skips certificate verification for this internal ASR connection.
-- `asr_proxy` -> ASR backend: re-encrypted with `proxy_pass https://`, since the real ASR backend only accepts `wss`. Upstream cert verification is disabled (`proxy_ssl_verify off`) because backends are addressed by IP with a private self-signed cert, matching the other internal `proxy_pass` blocks in `nginx/nginx.conf`.
+- `asr_proxy` -> ASR backend: re-encrypted with `ssl` server entries, since the real ASR backend only accepts `wss`. Upstream cert verification is disabled (`verify none`) because backends are addressed by IP with a private self-signed cert, matching the other internal proxy behavior.
 
 `asr_proxy` logs to Docker stdout/stderr:
 
-- `asr_backend_probe ... backend=<host:port> status=ok|failed` is emitted every 30 seconds for each configured backend, so you can tell whether the proxy can complete a TLS connection to every backend.
-- WebSocket access logs include `upstream="<host:port>"`, which shows which backend handled that relay connection. Nginx writes this access log when the WebSocket request finishes, so long-running ASR sessions appear after disconnect.
+- HAProxy health-check logs report backend up/down state.
+- WebSocket route logs include `event=route`, `backend=asr_backends`, `server=<server-name>`, `server_addr=<host:port>`, `status=<http-status>`, and active connection counters. `option logasap` emits this log as soon as the WebSocket handshake is routed, instead of waiting for the long-running ASR session to disconnect.
 
 #### Frontend (`frontend/.env`)
 

@@ -39,9 +39,9 @@ services:
       context: .
       dockerfile: asr_proxy/Dockerfile
     volumes:
-      - ./asr_proxy/asr_proxy.conf:/etc/nginx/nginx.conf:ro
-      - ./asr_proxy/backends.conf:/etc/nginx/asr_backends.conf:ro
-      - ./ssl-config:/etc/nginx/ssl:ro
+      - ./asr_proxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./asr_proxy/backends.conf:/usr/local/etc/haproxy/backends.cfg:ro
+      - ./ssl-config:/etc/haproxy/ssl:ro
     expose:
       - "9001"
     healthcheck:
