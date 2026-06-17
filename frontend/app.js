@@ -33,6 +33,15 @@
     return u.toString().replace(/\/$/, "");
   }
 
+  function deriveRecentSubtitlesUrl(relayWsUrl) {
+    const u = new URL(relayWsUrl);
+    u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+    u.pathname = u.pathname.replace(/\/subtitles(?=\/|$)/, "/subtitles_recent");
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  }
+
   async function registerKey(registerUrl, key) {
     const res = await fetch(`${registerUrl}?src=${encodeURIComponent(key)}`, {
       method: "POST",
@@ -48,6 +57,20 @@
       throw new Error("RATE_LIMIT");
     }
     throw new Error(`HTTP ${res.status}`);
+  }
+
+  async function fetchRecentSubtitles(recentSubtitlesUrl) {
+    const res = await fetch(recentSubtitlesUrl, {
+      method: "GET",
+      credentials: "same-origin",
+    });
+    if (res.status === 401) {
+      throw new Error("SESSION_EXPIRED");
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return res.json();
   }
 
   function showSessionExpired() {
@@ -170,15 +193,17 @@
     const registerUrl = deriveRegisterUrl(relayWsUrlBase);
     const streamUrl = `${streamUrlBase}/${key}/llhls.m3u8`;
     const relayWsUrl = `${relayWsUrlBase}/${key}`;
+    const recentSubtitlesUrl = deriveRecentSubtitlesUrl(relayWsUrl);
     console.log("[frontend] Source key:", key);
     console.log("[frontend] Register URL:", registerUrl);
     console.log("[frontend] Final stream URL:", streamUrl);
     console.log("[frontend] Final relay WS URL:", relayWsUrl);
+    console.log("[frontend] Recent subtitles URL:", recentSubtitlesUrl);
 
-    startApp(streamUrl, relayWsUrl, registerUrl, key);
+    startApp(streamUrl, relayWsUrl, recentSubtitlesUrl, registerUrl, key);
   }
 
-  function startApp(streamUrl, relayWsUrl, registerUrl, key) {
+  function startApp(streamUrl, relayWsUrl, recentSubtitlesUrl, registerUrl, key) {
     setupNotes(key);
     setupSubtitleFontSize();
     setupVideoControls();
@@ -296,10 +321,10 @@
     });
   }
 
-  function setCaption(lines) {
+  function setCaption(lines, options = {}) {
     if (!captionEl) return;
     // Never show captions while ASR is not connected.
-    if (asrState !== "connected") return;
+    if (!options.force && asrState !== "connected") return;
 
     // 檢查是否已經滾動到底部（或接近底部，允許 5px 的誤差）
     const isAtBottom = captionEl.scrollHeight - captionEl.scrollTop - captionEl.clientHeight <= 5;
@@ -310,6 +335,23 @@
     if (isAtBottom) {
       captionEl.scrollTop = captionEl.scrollHeight;
     }
+  }
+
+  function handleCaptionPayload(payload, options = {}) {
+    const lines = Array.isArray(payload.lines) ? payload.lines : [];
+    const hasUpdating = lines.some((line) => line && line.status === "updating");
+    if (options.updateStatus !== false) {
+      setSubtitleStatus(hasUpdating ? "receiving (updating)" : "receiving");
+    }
+    if (lines.length === 0) {
+      if (options.logCaption !== false) appendLog("Caption dropped: missing lines[] payload");
+      return false;
+    }
+    if (options.logCaption !== false) {
+      appendLog(`Caption${hasUpdating ? " (updating)" : ""}: received ${lines.length} lines`);
+    }
+    setCaption(lines, { force: options.force === true });
+    return true;
   }
 
   function updateCaptionItemElement(itemEl, item) {
@@ -514,17 +556,7 @@
       }
 
       if (payload.type === "caption") {
-        const lines = Array.isArray(payload.lines) ? payload.lines : [];
-        const hasUpdating = lines.some((line) => line && line.status === "updating");
-        setSubtitleStatus(hasUpdating ? "receiving (updating)" : "receiving");
-        if (lines.length === 0) {
-          appendLog("Caption dropped: missing lines[] payload");
-          return;
-        }
-        appendLog(
-          `Caption${hasUpdating ? " (updating)" : ""}: received ${lines.length} lines`
-        );
-        setCaption(lines);
+        handleCaptionPayload(payload);
         return;
       }
 
@@ -537,6 +569,40 @@
 
       appendLog("Unknown message type; ignored");
     };
+  }
+
+  async function loadRecentSubtitles() {
+    appendLog(`Loading recent subtitles: ${recentSubtitlesUrl}`);
+    setSubtitleStatus("loading recent subtitles...");
+    try {
+      const payload = await fetchRecentSubtitles(recentSubtitlesUrl);
+      const subtitles = Array.isArray(payload.subtitles) ? payload.subtitles : [];
+      let applied = 0;
+      subtitles.forEach((item) => {
+        if (!item || item.type !== "caption") return;
+        if (
+          handleCaptionPayload(item, {
+            force: true,
+            logCaption: false,
+            updateStatus: false,
+          })
+        ) {
+          applied += 1;
+        }
+      });
+      appendLog(
+        `Loaded recent subtitles: ${applied}/${subtitles.length} caption messages applied`
+      );
+      setSubtitleStatus("recent subtitles loaded");
+    } catch (err) {
+      if (isSessionExpiredError(err)) {
+        appendLog("recent subtitles failed: session expired");
+        showSessionExpired();
+        return;
+      }
+      appendLog(`recent subtitles failed: ${err?.message || err}`);
+      setSubtitleStatus("recent subtitles unavailable");
+    }
   }
 
   async function ensureRegistered(source) {
@@ -815,11 +881,13 @@
     tryNativePlay();
   }
 
-    // Auto start; reconnections are automatic inside loaders/handlers.
-    loadStream();
-
     appendLog("Waiting for playable stream signal before register/subtitles connect");
     setSubtitleStatus("waiting stream signal...");
+
+    loadRecentSubtitles();
+
+    // Auto start; reconnections are automatic inside loaders/handlers.
+    loadStream();
   }
 
   // 開始等待配置載入
