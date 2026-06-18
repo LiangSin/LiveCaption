@@ -73,6 +73,7 @@ SEND_BUDGET_SECONDS=0.1
 # Caption output service
 RELAY_HOST=0.0.0.0
 RELAY_PORT=9000
+RECENT_SUBTITLE_MINUTES=10
 ```
 
 What these mean:
@@ -87,6 +88,7 @@ What these mean:
 - `SEND_BUDGET_SECONDS`: Time budget (in seconds) for sending audio chunks before yielding control to the event loop (prevents sender from blocking receiver).
 - `RELAY_HOST`: Host address for the relay service to bind to (typically "0.0.0.0" to accept connections from any interface).
 - `RELAY_PORT`: Port number for the relay service to listen on for WebSocket connections from frontend clients.
+- `RECENT_SUBTITLE_MINUTES`: Time window (in minutes) for subtitles retained by `GET /subtitles_recent/<key>`.
 
 #### ASR reverse proxy (`asr_proxy/`)
 
@@ -212,6 +214,13 @@ The relay broadcasts JSON messages to all connected `/subtitles` clients:
   - `{"type":"status","state":"starting|running|waiting|error|stopped","detail":"...","ts":"<iso8601>"}`
 - **ASR status message**:
   - `{"type":"asr_status","state":"connecting|connected|disconnected|error","detail":"...","ts":"<iso8601>"}`
+
+Recent subtitles are also available through `GET /subtitles_recent/<key>`.
+The response contains caption messages retained within `RECENT_SUBTITLE_MINUTES`:
+
+```json
+{"key":"<key>","window_minutes":10,"subtitles":[{"type":"caption","text":"...","ts":"<iso8601>"}]}
+```
 
 The frontend automatically reconnects to the subtitle WebSocket and logs an idle message every 8 seconds when no messages are received from the relay.
 
