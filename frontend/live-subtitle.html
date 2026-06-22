@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LiveCaption · Live Subtitle</title>
+  <style>
+    /* Transparent background so OBS can key/overlay this page. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+    }
+    #live-subtitle {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2vh 4vw;
+      text-align: center;
+    }
+    #caption {
+      /* 黑匡白字: white fill with a black outline, centered, wraps when needed. */
+      color: #ffffff;
+      font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+      font-weight: 800;
+      font-size: clamp(28px, 9vh, 120px);
+      line-height: 1.25;
+      letter-spacing: 0.5px;
+      max-width: 100%;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      -webkit-text-stroke: 3px #000000;
+      paint-order: stroke fill;
+      text-shadow:
+        2px 2px 0 #000,
+        -2px 2px 0 #000,
+        2px -2px 0 #000,
+        -2px -2px 0 #000,
+        0 0 6px rgba(0, 0, 0, 0.6);
+    }
+  </style>
+  <!-- Runtime config: same file used by the main live page. -->
+  <script src="./config.js" defer></script>
+  <script src="./live-subtitle.js" defer></script>
+</head>
+<body>
+  <div id="live-subtitle">
+    <div id="caption"></div>
+  </div>
+</body>
+</html>

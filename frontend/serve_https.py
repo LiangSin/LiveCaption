@@ -94,7 +94,15 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self) -> None:
         path = urlparse(self.path).path
-        if path in {"/", "/index.html", "/app.js", "/config.js"}:
+        if path in {
+            "/",
+            "/index.html",
+            "/app.js",
+            "/config.js",
+            "/live-subtitle",
+            "/live-subtitle.html",
+            "/live-subtitle.js",
+        }:
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
@@ -202,6 +210,10 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/login":
             self._serve_login_page()
             return
+
+        if parsed.path == "/live-subtitle":
+            self.path = "/live-subtitle.html"
+            return super().do_GET()
 
         if parsed.path == "/auth/keys":
             try:
