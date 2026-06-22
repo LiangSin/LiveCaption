@@ -33,5 +33,15 @@
 
   "OME": {
     "container": "ome"
+  },
+
+  "ASR Proxy": {
+    "container": "asr_proxy",
+    "http_probe": {
+      "url": "https://asr_proxy:9001/health",
+      "verify_ssl": false,
+      "expected_status": 200,
+      "timeout": 5
+    }
   }
 }

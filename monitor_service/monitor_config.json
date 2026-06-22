@@ -5,7 +5,9 @@
     "Frontend",
     "Relay Service",
     "OME",
-    "WhisperLiveKit",
+    "ASR Proxy",
+    "WhisperLiveKit (Vast 1)",
+    "WhisperLiveKit (Cool Parrot)",
     "TranslateGemma",
     "Private Relay (nginx-rtmp)",
     "Streaming SSH Tunnel"
