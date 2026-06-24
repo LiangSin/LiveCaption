@@ -75,10 +75,17 @@ class SubtitleBroadcaster:
         while self._recent_subtitles and self._recent_subtitles[0][0] < cutoff:
             self._recent_subtitles.popleft()
 
-    async def recent_subtitles(self) -> list[dict]:
+    async def recent_subtitles(self, minutes: float | None = None) -> list[dict]:
         now = datetime.now(timezone.utc)
         async with self._lock:
             self._prune_recent_subtitles(now)
+            if minutes is not None and minutes > 0:
+                cutoff = now - timedelta(minutes=minutes)
+                return [
+                    dict(payload)
+                    for ts, payload in self._recent_subtitles
+                    if ts >= cutoff
+                ]
             return [dict(payload) for _, payload in self._recent_subtitles]
 
     async def broadcast_status(self, state: str, detail: str = ""):
@@ -186,7 +193,10 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
             await session.broadcaster.unregister(ws)
 
     @app.get("/subtitles_recent/{key}")
-    async def subtitles_recent(key: str):
+    async def subtitles_recent(
+        key: str,
+        length: float = Query(5.0, gt=0, description="Minutes of subtitles to return"),
+    ):
         try:
             validate_key(key)
         except InvalidKeyError as exc:
@@ -197,10 +207,11 @@ def create_app(cfg: RelayConfig, debug_mode: bool = False) -> FastAPI:
             SessionState.TERMINATED,
         ):
             raise HTTPException(status_code=404, detail=f"session not found: {key}")
+        effective_length = min(length, cfg.recent_subtitle_minutes)
         return {
             "key": key,
-            "window_minutes": cfg.recent_subtitle_minutes,
-            "subtitles": await session.broadcaster.recent_subtitles(),
+            "window_minutes": effective_length,
+            "subtitles": await session.broadcaster.recent_subtitles(effective_length),
         }
 
     @app.get("/healthz")
