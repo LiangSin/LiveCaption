@@ -10,3 +10,7 @@ __pycache__/
 
 # Authentication keys
 auth_keys.json
+
+# Other
+.claude/
+letsencrypt-auto/

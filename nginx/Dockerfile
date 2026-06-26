@@ -7,7 +7,8 @@ RUN apt-get update \
         libnginx-mod-stream \
         nginx \
         wget \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
 
 EXPOSE 1936 443
 
