@@ -5,7 +5,7 @@ LiveCaption is a small “relay + web UI” stack for **live captions on a live 
 This repository provides:
 
 - **`nginx/`**: a reverse proxy that
-  - accepts **RTMP ingest** from streaming sources
+  - accepts **RTMPS ingest** (TLS-encrypted RTMP on port 1936), terminates SSL, and forwards plain RTMP internally
   - forwards internal services (OME playback, relay WebSocket, web UI) to external clients
 - **`ome-server/`**: a media server (OvenMediaEngine) that
   - transcodes RTMP input to **LL-HLS** for browser playback
@@ -30,13 +30,13 @@ Not included in this repository:
 
 ### Architecture (high level)
 
-1. **Publisher** pushes RTMP stream to **nginx** reverse proxy
-2. **nginx** forwards RTMP to **OvenMediaEngine**, which transcodes to **LL-HLS** for browser playback
+1. **Publisher** pushes RTMPS stream to **nginx** reverse proxy (port 1936)
+2. **nginx** terminates TLS and forwards plain RTMP internally to **OvenMediaEngine**, which transcodes to **LL-HLS** for browser playback
 3. **relay_service** pulls audio and sends it to **asr_proxy**
 4. **asr_proxy** assigns each ASR WebSocket session to one configured ASR backend
 5. **frontend** plays LL-HLS stream and displays live captions
 
-**Key**: nginx routes all traffic (RTMP ingest, LL-HLS playback, WebSocket, web UI). Relay uses RTMP for audio extraction; browsers use LL-HLS for low-latency playback.
+**Key**: nginx routes all traffic (RTMPS ingest, LL-HLS playback, WebSocket, web UI). Relay uses internal RTMP for audio extraction; browsers use LL-HLS for low-latency playback.
 
 ---
 
@@ -145,24 +145,35 @@ Run `scripts/set_frontend_config.sh` to generate `frontend/config.js` and also s
 
 ### Run (Docker Compose)
 
-This runs: **nginx (RTMP+HLS)**, **asr_proxy**, **relay_service**, and **frontend**.
+This runs: **nginx (RTMPS+HLS)**, **asr_proxy**, **relay_service**, and **frontend**.
 
-Default RTMP ingest endpoint: `rtmp://<host>:1935/live`.
-Publish a test stream to the built-in RTMP server (example using FFmpeg):
+Default RTMPS ingest endpoint: `rtmps://<host>:1936/live`.
+Publish a test stream to the RTMPS server (example using FFmpeg):
 
 ```bash
 # Replace input.mp4 with your own media file
-ffmpeg -re -stream_loop -1 -i input.mp4 -c copy -f flv rtmp://127.0.0.1:1935/live/stream1
+ffmpeg -re -stream_loop -1 -i input.mp4 -c copy -f flv rtmps://127.0.0.1:1936/live/stream1
 ```
 
-1) Create env files:
+1) Generate TLS certificates for `ssl-config/`:
+
+```bash
+mkdir -p ssl-config
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout ssl-config/key.pem -out ssl-config/cert.pem \
+  -days 365 -subj "/CN=livecaption"
+```
+
+This self-signed certificate is used for both RTMPS ingest (nginx stream) and internal service TLS (asr_proxy). The `ssl-config/` directory is gitignored.
+
+2) Create env files:
 
 - `relay_service/.env` (see above)
 - `frontend/.env` (see above; for containers you usually want `FRONTEND_HOST=0.0.0.0`)
 
-2) Configure ASR backend addresses in `asr_proxy/backends.conf`.
+3) Configure ASR backend addresses in `asr_proxy/backends.conf`.
 
-3) Sync frontend config + ports (important):
+4) Sync frontend config + ports (important):
 
 ```bash
 ./scripts/set_frontend_config.sh
@@ -176,7 +187,7 @@ This will:
 
 Note: re-run this script after you update `frontend/.env`.
 
-4) Build and run:
+5) Build and run:
 
 ```bash
 docker compose up --build

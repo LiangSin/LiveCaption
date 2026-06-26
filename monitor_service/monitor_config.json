@@ -9,7 +9,6 @@
     "WhisperLiveKit (Vast 1)",
     "WhisperLiveKit (Cool Parrot)",
     "TranslateGemma",
-    "Private Relay (nginx-rtmp)",
-    "Streaming SSH Tunnel"
+    "Private Proxy (nginx)"
   ]
 }
