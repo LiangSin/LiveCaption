@@ -65,7 +65,6 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./nginx/allowed_networks.conf:/etc/nginx/allowed_networks.conf:ro
       - ./nginx/monitor.html:/usr/share/nginx/html/monitor.html:ro
-      - ./ssl-config:/etc/nginx/rtmps-certs:ro
     depends_on:
       - ome
       - relay_service
