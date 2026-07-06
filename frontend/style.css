@@ -280,11 +280,10 @@ input[type="text"] {
 #app[data-layout="simple"] .page--simple {
   display: grid;
   grid-template-columns: 3fr 2fr;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   align-items: stretch;
   justify-content: stretch;
   gap: 16px;
-  /* Symmetric inset from viewport — avoids uneven top/bottom and a flush right edge */
   padding: var(--simple-page-inset);
   min-height: 0;
 }
@@ -298,6 +297,8 @@ input[type="text"] {
 }
 
 #app[data-layout="simple"] .page--simple .video-container {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -316,16 +317,31 @@ input[type="text"] {
 #app[data-layout="simple"] .page--simple .no-signal-message {
   width: 100%;
   max-width: 100%;
-  max-height: calc(100% - 228px);
+  max-height: calc(100dvh - 2 * var(--simple-page-inset) - 228px);
   min-height: 0;
   object-fit: contain;
   flex: 0 1 auto;
 }
 
 #app[data-layout="simple"] .page--simple .subtitle-container {
+  grid-column: 2;
+  grid-row: 1 / -1;
   display: flex;
   align-items: stretch;
   justify-content: center;
+}
+
+#app[data-layout="simple"] .page--simple .note-container {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+#app[data-layout="simple"] .page--simple .note-container .note-area {
+  flex: 1;
+  margin-top: 0;
 }
 
 #app[data-layout="simple"] .page--simple .subtitle-panel {
@@ -506,6 +522,20 @@ input[type="text"] {
 .mute-toggle-button[aria-pressed="true"] .mute-toggle-button__icon--muted,
 .mute-toggle-button[aria-pressed="false"] .mute-toggle-button__icon--sound {
   display: block;
+}
+
+.note-toggle-button {
+  display: none;
+}
+
+.note-toggle-button__icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .live-badge {
@@ -744,21 +774,75 @@ input[type="text"] {
     height: auto;
   }
 
-  #app[data-layout="simple"] .page--simple .video-panel video,
-  #app[data-layout="simple"] .page--simple .no-signal-message {
-    max-height: calc(80vh - 228px);
-    max-height: calc(80dvh - 228px);
+  #app[data-layout="simple"] .page--simple .video-container {
+    order: 1;
   }
 
-  #app[data-layout="simple"] .page--simple .note-area {
-    height: 180px;
-    flex: 0 0 180px;
-    margin-top: 12px;
+  #app[data-layout="simple"] .page--simple .subtitle-container {
+    order: 2;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  #app[data-layout="simple"] .page--simple .note-container {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    height: 45vh;
+    padding: 16px var(--simple-page-inset);
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  #app[data-layout="simple"] .page--simple .note-container.note-container--open {
+    display: flex;
+  }
+
+  #app[data-layout="simple"] .page--simple .note-container .note-area {
+    flex: 1;
+    margin-top: 0;
+    min-height: 0;
+  }
+
+  .note-toggle-button {
+    display: inline-flex;
+    width: 34px;
+    height: 30px;
+    min-height: 30px;
+    margin-left: auto;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid #282800;
+    border-radius: 8px;
+    background: transparent;
+    color: #282800;
+  }
+
+  .note-toggle-button:hover,
+  .note-toggle-button:focus-visible {
+    background: rgba(40, 40, 0, 0.08);
+  }
+
+  .note-toggle-button[aria-expanded="true"] {
+    background: #282800;
+    color: #ffffff;
+  }
+
+  #app[data-layout="simple"] .page--simple .video-panel video,
+  #app[data-layout="simple"] .page--simple .no-signal-message {
+    max-height: calc(80vh - 48px);
+    max-height: calc(80dvh - 48px);
   }
 
   #app[data-layout="simple"] .page--simple .subtitle-panel .caption {
-    height: 200px;
-    flex: 0 0 auto;
+    flex: 1 1 0;
+    min-height: 0;
   }
 }
 

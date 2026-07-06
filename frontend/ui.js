@@ -85,7 +85,7 @@
     noSignal.textContent = "Streaming has not started";
     panel.appendChild(noSignal);
 
-    if (!options.overlay) {
+    if (!options.overlay && options.note !== false) {
       const noteArea = document.createElement("textarea");
       noteArea.id = "noteArea";
       noteArea.className = "note-area";
@@ -225,16 +225,48 @@
       layout.appendChild(videoPanel);
       main.appendChild(layout);
     } else if (layoutMode === "simple") {
-      // Simple mode: video and subtitle in separate containers
       const videoContainer = document.createElement("section");
       videoContainer.className = "video-container";
-      videoContainer.appendChild(createVideoPanel({ showStatus, panel: usePanel }));
+      const videoPanel = createVideoPanel({ showStatus, panel: usePanel, note: false });
+      videoContainer.appendChild(videoPanel);
       main.appendChild(videoContainer);
 
       const subtitleContainer = document.createElement("section");
       subtitleContainer.className = "subtitle-container";
       subtitleContainer.appendChild(createSubtitlePanel({ showLog, showStatus, panel: usePanel }));
       main.appendChild(subtitleContainer);
+
+      const noteContainer = document.createElement("section");
+      noteContainer.className = "note-container";
+      const noteArea = document.createElement("textarea");
+      noteArea.id = "noteArea";
+      noteArea.className = "note-area";
+      noteArea.placeholder = "筆記區 -- 輸入任何屬於你的內容";
+      noteArea.setAttribute("aria-label", "筆記區");
+      noteArea.spellcheck = false;
+      noteContainer.appendChild(noteArea);
+      main.appendChild(noteContainer);
+
+      const noteToggleButton = document.createElement("button");
+      noteToggleButton.type = "button";
+      noteToggleButton.id = "noteToggleButton";
+      noteToggleButton.className = "note-toggle-button";
+      noteToggleButton.setAttribute("aria-label", "開關筆記區");
+      noteToggleButton.setAttribute("aria-expanded", "false");
+      noteToggleButton.innerHTML = `
+        <svg class="note-toggle-button__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 20h9"></path>
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+        </svg>
+      `;
+      noteToggleButton.addEventListener("click", () => {
+        const expanded = noteContainer.classList.toggle("note-container--open");
+        noteToggleButton.setAttribute("aria-expanded", String(expanded));
+      });
+      const videoToolbar = videoPanel.querySelector(".media-toolbar--video");
+      if (videoToolbar) {
+        videoToolbar.insertBefore(noteToggleButton, videoToolbar.querySelector(".mute-toggle-button"));
+      }
     } else {
       // Default mode: both in one layout container
       const layout = document.createElement("section");
