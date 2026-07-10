@@ -33,6 +33,116 @@ def build_unverified_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+def _clean_text(value) -> str:
+    return str(value or "").strip()
+
+
+def _normalize_timestamp(value):
+    if value is None or value == "":
+        return None
+    return value
+
+
+def segment_key(segment: dict) -> str:
+    """Identity of a finalized sentence.
+
+    Timestamps alone are not enough: they have 1-second resolution, so two
+    short sentences starting in the same second would collide and the newer
+    one would overwrite the older one on the frontend. Text is stable once a
+    sentence is finalized (only its translation is filled in later), so it is
+    safe to include in the key.
+    """
+    return json.dumps(
+        [segment.get("start"), segment.get("end"), segment.get("text")],
+        ensure_ascii=False,
+    )
+
+
+def normalize_caption_lines(payload: dict) -> list[dict]:
+    """Extract caption lines from an ASR payload into a uniform shape."""
+    raw_lines = payload.get("lines") or []
+    normalized_lines = []
+    if isinstance(raw_lines, list):
+        for line in raw_lines:
+            if isinstance(line, str):
+                original = line.strip()
+                translation = ""
+                start = None
+                end = None
+            elif isinstance(line, dict):
+                original = _clean_text(
+                    line.get("original")
+                    or line.get("text")
+                    or line.get("caption")
+                    or line.get("source")
+                )
+                translation = _clean_text(
+                    line.get("translation")
+                    or line.get("text_translation")
+                    or line.get("translation_text")
+                    or line.get("translated")
+                    or line.get("translated_text")
+                    or line.get("target")
+                    or line.get("target_text")
+                )
+                start = _normalize_timestamp(line.get("start"))
+                end = _normalize_timestamp(line.get("end"))
+            else:
+                continue
+            if (not original and not translation) or start is None:
+                continue
+            normalized_lines.append(
+                {
+                    "text": original,
+                    "translation": translation,
+                    "start": start,
+                    "end": end,
+                }
+            )
+
+    buffer_text = (payload.get("buffer_transcription") or "").strip()
+    buffer_translation = (payload.get("buffer_translation") or "").strip()
+    buffer_start = _normalize_timestamp(payload.get("buffer_start") or payload.get("start"))
+    buffer_end = _normalize_timestamp(payload.get("buffer_end") or payload.get("end"))
+    if (buffer_text or buffer_translation) and buffer_start is not None:
+        normalized_lines.append(
+            {
+                "text": buffer_text,
+                "translation": buffer_translation,
+                "start": buffer_start,
+                "end": buffer_end,
+            }
+        )
+    return normalized_lines
+
+
+def classify_caption_lines(normalized_lines: list[dict], emitted_segments: dict) -> list[dict]:
+    """Assign statuses for the frontend's append/patch/replace protocol.
+
+    The last line is the in-progress sentence and is always "updating" — the
+    frontend replaces it in place, so pending text/translation refreshes are
+    never rendered as new sentences. Earlier lines are finalized: emitted once
+    as "segment", then as "segment_update" only when their translation is
+    filled in later. ``emitted_segments`` is mutated to track what was sent.
+    """
+    if not normalized_lines:
+        return []
+    outbound_lines = []
+    for segment in normalized_lines[:-1]:
+        key = segment_key(segment)
+        previous_segment = emitted_segments.get(key)
+        if previous_segment is None:
+            emitted_segments[key] = segment
+            outbound_lines.append({**segment, "status": "segment"})
+            continue
+        if segment.get("translation") == previous_segment.get("translation"):
+            continue
+        emitted_segments[key] = segment
+        outbound_lines.append({**segment, "status": "segment_update"})
+    outbound_lines.append({**normalized_lines[-1], "status": "updating"})
+    return outbound_lines
+
+
 async def asr_link(
     cfg: RelayConfig,
     audio_queue: AudioQueue,
@@ -58,17 +168,6 @@ async def asr_link(
     last_status: str | None = None
     last_caption: tuple[str, bool] | None = None
     emitted_segments: dict[str, dict] = {}
-
-    def timestamp_key(value) -> str:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-    def clean_text(value) -> str:
-        return str(value or "").strip()
-
-    def normalize_timestamp(value):
-        if value is None or value == "":
-            return None
-        return value
 
     async def graceful_stop(ws) -> None:
         """Signal stream end with empty bytes, then wait for ready_to_stop."""
@@ -256,79 +355,10 @@ async def asr_link(
                             )
                             last_status = status
 
-                        raw_lines = payload.get("lines") or []
-                        normalized_lines = []
-                        if isinstance(raw_lines, list):
-                            for line in raw_lines:
-                                if isinstance(line, str):
-                                    original = line.strip()
-                                    translation = ""
-                                    start = None
-                                    end = None
-                                elif isinstance(line, dict):
-                                    original = clean_text(
-                                        line.get("original")
-                                        or line.get("text")
-                                        or line.get("caption")
-                                        or line.get("source")
-                                    )
-                                    translation = clean_text(
-                                        line.get("translation")
-                                        or line.get("text_translation")
-                                        or line.get("translation_text")
-                                        or line.get("translated")
-                                        or line.get("translated_text")
-                                        or line.get("target")
-                                        or line.get("target_text")
-                                    )
-                                    start = normalize_timestamp(line.get("start"))
-                                    end = normalize_timestamp(line.get("end"))
-                                else:
-                                    continue
-                                if (not original and not translation) or start is None:
-                                    continue
-                                normalized_lines.append(
-                                    {
-                                        "text": original,
-                                        "translation": translation,
-                                        "start": start,
-                                        "end": end,
-                                    }
-                                )
-
-                        buffer_text = (payload.get("buffer_transcription") or "").strip()
-                        buffer_translation = (payload.get("buffer_translation") or "").strip()
-                        buffer_start = normalize_timestamp(payload.get("buffer_start") or payload.get("start"))
-                        buffer_end = normalize_timestamp(payload.get("buffer_end") or payload.get("end"))
-                        if (buffer_text or buffer_translation) and buffer_start is not None:
-                            normalized_lines.append(
-                                {
-                                    "text": buffer_text,
-                                    "translation": buffer_translation,
-                                    "start": buffer_start,
-                                    "end": buffer_end,
-                                }
-                            )
-
-                        if normalized_lines:
+                        normalized_lines = normalize_caption_lines(payload)
+                        outbound_lines = classify_caption_lines(normalized_lines, emitted_segments)
+                        if outbound_lines:
                             latest = normalized_lines[-1]
-                            outbound_lines = []
-                            for segment in normalized_lines[:-1]:
-                                start_key = timestamp_key(segment["start"])
-                                previous_segment = emitted_segments.get(start_key)
-                                if previous_segment is None:
-                                    emitted_segments[start_key] = segment
-                                    outbound_lines.append({**segment, "status": "segment"})
-                                    continue
-                                if (
-                                    segment.get("text") == previous_segment.get("text")
-                                    and segment.get("translation") == previous_segment.get("translation")
-                                    and segment.get("end") == previous_segment.get("end")
-                                ):
-                                    continue
-                                emitted_segments[start_key] = segment
-                                outbound_lines.append({**segment, "status": "segment_update"})
-                            outbound_lines.append({**latest, "status": "updating"})
                             caption_key = (
                                 json.dumps(outbound_lines, ensure_ascii=False, sort_keys=True),
                                 False,

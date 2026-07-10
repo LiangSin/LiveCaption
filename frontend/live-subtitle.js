@@ -62,8 +62,11 @@
     };
   }
 
-  function startKey(start) {
-    return JSON.stringify(start ?? null);
+  // Mirrors relay_service/asr_link.py:segment_key — timestamps have 1-second
+  // resolution, so the original text is part of the identity to keep two
+  // short sentences starting in the same second apart.
+  function segmentKey(item) {
+    return JSON.stringify([item.start ?? null, item.end ?? null, item.original ?? ""]);
   }
 
   function applyLines(lines) {
@@ -80,10 +83,10 @@
       }
 
       if (item.status === "segment_update") {
-        var sk = startKey(item.start);
+        var sk = segmentKey(item);
         var existing = null;
         for (var i = segments.length - 1; i >= 0; i -= 1) {
-          if (startKey(segments[i].start) === sk) { existing = segments[i]; break; }
+          if (segmentKey(segments[i]) === sk) { existing = segments[i]; break; }
         }
         if (existing) {
           Object.assign(existing, item, { status: "segment" });

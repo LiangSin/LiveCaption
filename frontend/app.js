@@ -383,10 +383,13 @@
 
   let currentUpdatingItem = null;
   let currentUpdatingEl = null;
-  const segmentElementsByStart = new Map();
+  const segmentElementsByKey = new Map();
 
-  function captionStartKey(start) {
-    return JSON.stringify(start ?? null);
+  // Mirrors relay_service/asr_link.py:segment_key — timestamps have 1-second
+  // resolution, so the original text is part of the identity to keep two
+  // short sentences starting in the same second apart.
+  function captionSegmentKey(item) {
+    return JSON.stringify([item.start ?? null, item.end ?? null, item.original ?? ""]);
   }
 
   function clearCurrentUpdating() {
@@ -410,9 +413,9 @@
         return;
       }
       if (item.status === "segment_update") {
-        const startKey = captionStartKey(item.start);
-        const existingEl = segmentElementsByStart.get(startKey);
-        const existingItem = captionItems.find((candidate) => captionStartKey(candidate.start) === startKey);
+        const segKey = captionSegmentKey(item);
+        const existingEl = segmentElementsByKey.get(segKey);
+        const existingItem = captionItems.find((candidate) => captionSegmentKey(candidate) === segKey);
         if (existingEl && existingItem) {
           Object.assign(existingItem, item, { status: "segment" });
           updateCaptionItemElement(existingEl, existingItem);
@@ -423,7 +426,7 @@
       item.status = "segment";
       captionItems.push(item);
       const itemEl = createCaptionItemElement(item);
-      segmentElementsByStart.set(captionStartKey(item.start), itemEl);
+      segmentElementsByKey.set(captionSegmentKey(item), itemEl);
       captionEl.appendChild(itemEl);
     });
   }
@@ -431,11 +434,11 @@
   function renderCaptionState() {
     if (!captionEl) return;
     captionEl.textContent = "";
-    segmentElementsByStart.clear();
+    segmentElementsByKey.clear();
     const fragment = document.createDocumentFragment();
     captionItems.forEach((item) => {
       const itemEl = createCaptionItemElement(item);
-      segmentElementsByStart.set(captionStartKey(item.start), itemEl);
+      segmentElementsByKey.set(captionSegmentKey(item), itemEl);
       fragment.appendChild(itemEl);
     });
     if (currentUpdatingItem) {
