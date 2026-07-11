@@ -18,7 +18,8 @@
         </Providers>
         <Publishers>
             <LLHLS>
-                <TLSPort>8888</TLSPort>
+                <!-- Plain HTTP: only reachable inside the docker network -->
+                <Port>8888</Port>
             </LLHLS>
         </Publishers>
     </Bind>
