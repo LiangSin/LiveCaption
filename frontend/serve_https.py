@@ -172,28 +172,6 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
             return None
         return key, remaining_seconds
 
-    def _validate_cookie(self) -> str | None:
-        session = self._validate_cookie_session()
-        return session[0] if session else None
-
-    def _key_from_original_uri(self) -> str | None:
-        original = self.headers.get("X-Original-URI", self.path)
-        parsed = urlparse(original)
-        path = parsed.path
-        if path.startswith("/live/"):
-            parts = path.split("/")
-            return parts[2] if len(parts) > 2 and parts[2] else None
-        if path.startswith("/subtitles/"):
-            parts = path.split("/")
-            return parts[2] if len(parts) > 2 and parts[2] else None
-        if path.startswith("/subtitles_recent/"):
-            parts = path.split("/")
-            return parts[2] if len(parts) > 2 and parts[2] else None
-        if path == "/register":
-            values = parse_qs(parsed.query).get("src")
-            return values[0] if values else None
-        return None
-
     def _serve_login_page(self) -> None:
         self.path = "/login.html"
         return super().do_GET()
@@ -248,17 +226,6 @@ class _TLSRequestHandler(SimpleHTTPRequestHandler):
                     }
                 )
             self._send_json(HTTPStatus.OK, payload)
-            return
-
-        if parsed.path == "/auth/verify":
-            cookie_key = self._validate_cookie()
-            requested_key = self._key_from_original_uri()
-            if cookie_key and requested_key and hmac.compare_digest(cookie_key, requested_key):
-                self.send_response(HTTPStatus.NO_CONTENT)
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                return
-            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
 
         return super().do_GET()

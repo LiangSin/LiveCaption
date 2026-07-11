@@ -3,6 +3,7 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        libnginx-mod-http-js \
         libnginx-mod-rtmp \
         libnginx-mod-stream \
         nginx \
