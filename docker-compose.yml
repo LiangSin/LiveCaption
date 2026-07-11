@@ -35,6 +35,7 @@ services:
 
   asr_proxy:
     container_name: asr_proxy
+    init: true
     build:
       context: .
       dockerfile: asr_proxy/Dockerfile
