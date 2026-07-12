@@ -689,10 +689,19 @@
   function loadHlsStream(url) {
     const isHlsUrl = url.endsWith(".m3u8");
     const useHlsJs = window.Hls && window.Hls.isSupported() && isHlsUrl;
-    const LIVE_SYNC_TARGET_SECONDS = 1.2;
-    const LIVE_MAX_LATENCY_SECONDS = 4;
-    const LIVE_SEEK_THRESHOLD_SECONDS = 6;
-    const LIVE_SEEK_COOLDOWN_MS = 8000;
+    // ── Latency / buffer tuning ──
+    // Target latency: how far behind the live edge we aim to play. Kept as
+    // low as possible for the classroom/lecture sync use case, but must leave
+    // enough cushion for the network to survive brief throughput dips (WiFi
+    // packet loss, congestion window collapse) without stalling.
+    const LIVE_SYNC_TARGET_SECONDS = 2.5;
+    // hls.js will start accelerating (1.05×) once latency exceeds this:
+    const LIVE_MAX_LATENCY_SECONDS = 6;
+    // Hard seek: last resort when hls.js's 1.05× catchup cannot close the
+    // gap (e.g. after a long stall/rebuffer). Set well above
+    // LIVE_MAX_LATENCY_SECONDS so the two mechanisms never fight each other.
+    const LIVE_SEEK_THRESHOLD_SECONDS = 15;
+    const LIVE_SEEK_COOLDOWN_MS = 10000;
     if (liveCatchupTimer) {
       clearInterval(liveCatchupTimer);
       liveCatchupTimer = null;
@@ -704,10 +713,10 @@
         // Stay close to the LL-HLS edge while keeping a small cushion for jitter.
         liveSyncDuration: LIVE_SYNC_TARGET_SECONDS,
         liveMaxLatencyDuration: LIVE_MAX_LATENCY_SECONDS,
-        maxLiveSyncPlaybackRate: 1,
+        maxLiveSyncPlaybackRate: 1.02,
         liveDurationInfinity: true,
-        maxBufferLength: 4,
-        maxMaxBufferLength: 8,
+        maxBufferLength: 6,
+        maxMaxBufferLength: 12,
         highBufferWatchdogPeriod: 2,
         maxBufferHole: 0.5,
         maxFragLookUpTolerance: 0.25,
@@ -841,6 +850,15 @@
       hls.attachMedia(player);
       player.addEventListener("canplay", () => markStreamPlayable("video canplay"), { once: true });
       player.addEventListener("playing", () => markStreamPlayable("video playing"), { once: true });
+
+      let lastLoggedRate = 1;
+      player.addEventListener("ratechange", () => {
+        const r = player.playbackRate;
+        if (r !== lastLoggedRate) {
+          appendLog(`Catchup: playback rate ${lastLoggedRate}x → ${r}x`);
+          lastLoggedRate = r;
+        }
+      });
 
       applyVideoMuteState();
 
