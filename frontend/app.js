@@ -191,7 +191,9 @@
     }
 
     const registerUrl = deriveRegisterUrl(relayWsUrlBase);
-    const streamUrl = `${streamUrlBase}/${key}/llhls.m3u8`;
+    // abr.m3u8: OME ABR playlist (source + 360p rendition); the player
+    // switches renditions based on its own measured throughput.
+    const streamUrl = `${streamUrlBase}/${key}/abr.m3u8`;
     const relayWsUrl = `${relayWsUrlBase}/${key}`;
     const recentSubtitlesUrl = deriveRecentSubtitlesUrl(relayWsUrl);
     console.log("[frontend] Source key:", key);
@@ -712,6 +714,12 @@
         backBufferLength: 15,
         maxRetries: 6,
         startLevel: -1,
+        // ABR: default up-switch needs ~1.4x headroom over the higher level's
+        // bitrate; at the low rendition the tiny LL-HLS parts make bandwidth
+        // estimates run low, so relax the threshold and let the slow EWMA
+        // recover faster. These only affect rendition choice, not buffering.
+        abrBandWidthUpFactor: 0.9,
+        abrEwmaSlowLive: 5,
         enableWorker: true,
         debug: false,
         xhrSetup: (xhr) => {
@@ -774,6 +782,17 @@
         appendLog(`HLS: Manifest parsed, levels: ${data.levels?.length || 0}`);
         hasManifestParsed = true;
         // Manifest parsed does not guarantee media is actually playable yet.
+      });
+
+      hls.on(window.Hls.Events.LEVEL_SWITCHED, (event, data) => {
+        const lvl = hls.levels?.[data.level];
+        if (lvl) {
+          const est = hls.bandwidthEstimate;
+          appendLog(
+            `ABR: now playing ${lvl.height}p @ ${Math.round(lvl.bitrate / 1000)}kbps` +
+            (Number.isFinite(est) ? ` (estimated bandwidth ${Math.round(est / 1000)}kbps)` : "")
+          );
+        }
       });
 
       // hls.on(window.Hls.Events.LEVEL_LOADING, (event, data) => {

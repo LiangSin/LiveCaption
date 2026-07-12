@@ -45,13 +45,44 @@
                         <OutputProfile>
                             <Name>bypass</Name>
                             <OutputStreamName>${OriginStreamName}</OutputStreamName>
+                            <!-- ABR: viewers on a degraded network (e.g. crowded
+                                 venue WiFi) auto-switch to the 360p rendition;
+                                 playback URL is /<app>/<stream>/abr.m3u8 -->
+                            <Playlist>
+                                <Name>llhls_abr</Name>
+                                <FileName>abr</FileName>
+                                <Rendition>
+                                    <Name>source</Name>
+                                    <Video>bypass_video</Video>
+                                    <Audio>bypass_audio</Audio>
+                                </Rendition>
+                                <Rendition>
+                                    <Name>low</Name>
+                                    <Video>video_480p</Video>
+                                    <Audio>bypass_audio</Audio>
+                                </Rendition>
+                            </Playlist>
                             <Encodes>
                                 <Video>
+                                    <Name>bypass_video</Name>
                                     <Bypass>true</Bypass>
                                 </Video>
                                 <Audio>
+                                    <Name>bypass_audio</Name>
                                     <Bypass>true</Bypass>
                                 </Audio>
+                                <Video>
+                                    <Name>video_480p</Name>
+                                    <Codec>h264</Codec>
+                                    <Bitrate>800000</Bitrate>
+                                    <Width>854</Width>
+                                    <Height>480</Height>
+                                    <!-- 60 frames = 2s GOP at 30fps, aligned with
+                                         SegmentDuration for clean ABR switching -->
+                                    <KeyFrameInterval>60</KeyFrameInterval>
+                                    <BFrames>0</BFrames>
+                                    <Preset>faster</Preset>
+                                </Video>
                             </Encodes>
                         </OutputProfile>
                     </OutputProfiles>
