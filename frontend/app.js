@@ -279,17 +279,49 @@
     activeHls = null;
   }
 
-  function scheduleStreamReload(reason, delayMs = 10000) {
+  // While offline, quietly poll the LL-HLS playlist without touching the
+  // player or UI (the old timed reload loop re-ran the whole load path every
+  // 10s, flashing between "loading" and "no signal" each cycle). The player
+  // is only (re)created on the offline→live transition.
+  const STREAM_POLL_MS = 5000;
+
+  async function probeStreamStatus() {
+    try {
+      const res = await fetch(streamUrl, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      return res.status;
+    } catch {
+      return 0; // network error: treat as offline, keep polling
+    }
+  }
+
+  function scheduleStreamReload(reason, delayMs = STREAM_POLL_MS) {
     if (sessionExpired) return;
     if (streamRetryTimer) {
-      appendLog(`Reload already scheduled; skip duplicate (${reason})`);
+      appendLog(`Stream watch already active; skip duplicate (${reason})`);
       return;
     }
-    appendLog(`Scheduling stream reload in ${delayMs}ms (${reason})`);
-    streamRetryTimer = setTimeout(() => {
+    appendLog(`Waiting for stream (${reason}); polling every ${STREAM_POLL_MS / 1000}s`);
+    const poll = async () => {
       streamRetryTimer = null;
-      loadStream();
-    }, delayMs);
+      if (sessionExpired) return;
+      const status = await probeStreamStatus();
+      if (status === 401) {
+        appendLog("Stream probe: session expired");
+        showSessionExpired();
+        return;
+      }
+      if (status === 200) {
+        appendLog("Stream is live; starting player");
+        loadStream();
+        return;
+      }
+      streamRetryTimer = setTimeout(poll, STREAM_POLL_MS);
+    };
+    streamRetryTimer = setTimeout(poll, delayMs);
   }
 
   function handleStreamLost(reason) {
@@ -654,23 +686,18 @@
     clearStreamNoSignalTimeout();
     destroyActiveHls();
     appendLog(`Loading stream: ${url}`);
-    setVideoStatus("loading...");
 
-    // 先測試 URL 是否可以訪問
-    fetch(url, {
-      method: 'HEAD',
-      mode: 'cors',  // 明確指定 CORS 模式
-      credentials: 'same-origin'
-    })
-      .then(response => {
-        if (response.status === 401) {
+    // Probe first; only switch the UI into "loading" once the stream is
+    // confirmed live, so an offline stream never flashes the player.
+    probeStreamStatus()
+      .then(status => {
+        if (status === 401) {
           throw new Error("SESSION_EXPIRED");
         }
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+        if (status !== 200) {
+          throw new Error(status === 0 ? "network error" : `HTTP ${status}`);
         }
-        appendLog(`HLS URL accessible: ${response.status}, headers: ${response.headers.get('access-control-allow-origin')}`);
-        // 只有在測試成功時才載入 HLS
+        setVideoStatus("loading...");
         loadHlsStream(url);
       })
       .catch(error => {
@@ -679,10 +706,9 @@
           showSessionExpired();
           return;
         }
-        appendLog(`HLS URL fetch error: ${error.message}, type: ${error.name}`);
-        console.error('Fetch error details:', error);
+        appendLog(`Stream offline (${error.message}); waiting`);
         setVideoStatus("no signal");
-        scheduleStreamReload("HEAD fetch failed");
+        scheduleStreamReload("stream offline");
       });
   }
 

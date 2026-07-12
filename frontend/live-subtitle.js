@@ -169,6 +169,35 @@
     throw new Error(`register HTTP ${res.status}`);
   }
 
+  // ── Stream liveness gating ──
+  // This page runs inside OBS as a browser source and is typically loaded
+  // long before the presenter starts streaming. Registering on page load
+  // would create a relay session that idle-terminates (~70s) before any
+  // audio arrives. Instead we poll the LL-HLS playlist — cheap, verified
+  // in-process by nginx, and not rate-limited — and only call /register on
+  // the offline→live transition, so the session is created exactly when
+  // there is audio to feed it.
+  const STREAM_POLL_MS = 5000;
+  // /register is rate-limited by nginx (10/min); never retry faster than this.
+  const REGISTER_RETRY_MS = 15000;
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function probeStreamStatus() {
+    try {
+      const res = await fetch(`/live/${encodeURIComponent(key)}/abr.m3u8`, {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      return res.status;
+    } catch {
+      return 0; // network error: treat as offline, keep polling
+    }
+  }
+
   async function loadRecentSubtitles(recentSubtitlesUrl) {
     try {
       const res = await fetch(recentSubtitlesUrl, {
@@ -252,16 +281,54 @@
       return;
     }
 
-    try {
-      const status = await registerKey(registerUrl);
-      log(`register success: HTTP ${status}`);
-    } catch (err) {
-      log(`register failed: ${err && err.message ? err.message : err}`);
-      // Still attempt to seed/subscribe; another viewer may already hold the session.
-    }
+    let wsStarted = false;
+    let wasLive = false;
+    let needRegister = false;
+    let lastRegisterAttempt = 0;
 
-    await loadRecentSubtitles(recentSubtitlesUrl);
-    connectWs(relayWsUrl);
+    for (;;) {
+      let status = await probeStreamStatus();
+      if (status === 401 && passwd) {
+        // Cookie expired (12h TTL can elapse during a long OBS session).
+        log("Auth expired; re-authenticating");
+        try {
+          await ensureAuth();
+          status = await probeStreamStatus();
+        } catch (err) {
+          log(`Re-auth failed: ${err && err.message ? err.message : err}`);
+        }
+      }
+
+      const live = status === 200;
+      if (live && !wasLive) {
+        log("Stream is live");
+        needRegister = true;
+      }
+      if (!live && wasLive) {
+        log("Stream went offline; will re-register when it returns");
+      }
+
+      if (live && needRegister && Date.now() - lastRegisterAttempt >= REGISTER_RETRY_MS) {
+        lastRegisterAttempt = Date.now();
+        try {
+          const st = await registerKey(registerUrl);
+          log(`register success: HTTP ${st}`);
+          needRegister = false;
+          if (!wsStarted) {
+            wsStarted = true;
+            await loadRecentSubtitles(recentSubtitlesUrl);
+            connectWs(relayWsUrl);
+          }
+        } catch (err) {
+          // Transient failure (e.g. 429/5xx): keep needRegister set and retry
+          // on a later tick while the stream stays live.
+          log(`register failed (will retry): ${err && err.message ? err.message : err}`);
+        }
+      }
+
+      wasLive = live;
+      await sleep(STREAM_POLL_MS);
+    }
   }
 
   function waitForConfig() {
