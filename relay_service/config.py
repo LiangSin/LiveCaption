@@ -21,7 +21,7 @@ class RelayConfig:
     recent_subtitle_minutes: float = _env(
         "RECENT_SUBTITLE_MINUTES",
         cast=float,
-        default=10,
+        default=15,
     )
     chunk_ms: int = _env("CHUNK_MS", cast=int, default=500)
     sample_rate: int = _env("SAMPLE_RATE", cast=int, default=16000)
