@@ -18,6 +18,7 @@ services:
       - monitor_service/.env
     volumes:
       - ./monitor_service/monitor_config.json:/app/monitor_config.json:ro
+    restart: unless-stopped
 
   monitor_client:
     container_name: monitor_client
@@ -83,6 +84,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    restart: unless-stopped
 
   relay_service:
     container_name: relay_service
@@ -93,6 +95,7 @@ services:
       - relay_service/.env
     depends_on:
       - asr_proxy
+    restart: unless-stopped
 
   frontend:
     container_name: frontend
@@ -104,4 +107,5 @@ services:
       - ./auth_keys.json:/app/frontend/auth_keys.json:ro
     env_file:
       - frontend/.env
+    restart: unless-stopped
 
